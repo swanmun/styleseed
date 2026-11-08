@@ -129,10 +129,11 @@ function QuickActionCard({
 
 type HomeQuickActionsProps = {
   onAddItem: () => void;
+  onLinkStyle: () => void;
 };
 
-// Quick Actions. "상품 링크로 코디하기"는 아직 앱에 없는 기능이라 누를 수 없게 두고 "준비 중"으로 표시한다
-export function HomeQuickActions({ onAddItem }: HomeQuickActionsProps) {
+// Quick Actions. "상품 링크로 코디하기"는 화면 흐름만 연결했다(사진 분석·링크 읽기는 TODO: src/lib/linkProduct.ts)
+export function HomeQuickActions({ onAddItem, onLinkStyle }: HomeQuickActionsProps) {
   return (
     <View style={styles.cards}>
       <QuickActionCard
@@ -146,7 +147,7 @@ export function HomeQuickActions({ onAddItem }: HomeQuickActionsProps) {
         icon="link-outline"
         label={"상품 링크로\n코디하기"}
         description="쇼핑 전 코디 TOP 3 확인"
-        comingSoon
+        onPress={onLinkStyle}
       />
     </View>
   );
