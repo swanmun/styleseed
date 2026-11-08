@@ -210,7 +210,10 @@ function HomeScreen() {
           )}
         </View>
 
-        <HomeQuickActions onAddItem={() => router.push("/upload")} />
+        <HomeQuickActions
+          onAddItem={() => router.push("/upload")}
+          onLinkStyle={() => router.push("/link-style")}
+        />
       </View>
     </Screen>
   );
