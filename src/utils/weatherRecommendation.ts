@@ -546,12 +546,12 @@ const buildNote = (
   return { category, kind, message };
 };
 
-type WeatherPool = {
+export type WeatherPool = {
   pool: Clothing[];
   notes: WeatherClosetNote[];
 };
 
-const buildWeatherPool = (clothes: Clothing[], rule: WeatherRule): WeatherPool => {
+export const buildWeatherPool = (clothes: Clothing[], rule: WeatherRule): WeatherPool => {
   const notes: WeatherClosetNote[] = [];
 
   const fitOf = (clothing: Clothing) => getWeatherFitScore(clothing, rule);
