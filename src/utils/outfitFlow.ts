@@ -38,6 +38,8 @@ export type FlowOptions = {
   perSlotLimit?: number;
   // 상의·하의(또는 원피스)가 같은 코디는 하나만 고른다
   diverse?: boolean;
+  // ③ 점수를 갈아 끼울 때(시험·실험용). 없으면 MATCH(evaluateOutfit의 total)
+  score?: (items: Clothing[], evaluation: OutfitEvaluation) => number;
 };
 
 export type FlowInput = {
@@ -52,6 +54,8 @@ export type FlowLook = OutfitEvaluation & {
   key: string;
   // 상의·하의 또는 원피스 id (정렬)
   core: string;
+  // 순위를 정한 점수(기본은 MATCH와 같음)
+  rank: number;
 };
 
 export type FlowResult = {
@@ -67,6 +71,7 @@ const DEFAULTS: Required<FlowOptions> = {
   maxCandidates: 4000,
   perSlotLimit: 6,
   diverse: true,
+  score: (_items, evaluation) => evaluation.total,
 };
 
 const idsKey = (items: Clothing[]) =>
@@ -98,6 +103,8 @@ export const recommendOutfits = ({
   const pool = filtered.filter((item) => item.id !== fixed?.id);
 
   const roleOf = (item: Clothing): OutfitRole => getOutfitRole(item);
+
+  const rankOf = (items: Clothing[]) => opts.score(items, evaluateOutfit(items, closet));
 
   const tops = pool.filter((item) => isUpperRole(roleOf(item)));
   const bottoms = pool.filter((item) => roleOf(item) === "bottom");
@@ -176,14 +183,14 @@ export const recommendOutfits = ({
   if (total > opts.maxCandidates) {
     pruned = true;
 
-    cores = topBy(cores, (core) => evaluateOutfit([...core, ...extras], closet).total, opts.perSlotLimit * 3);
+    cores = topBy(cores, (core) => rankOf([...core, ...extras]), opts.perSlotLimit * 3);
 
     const sampleCores = cores.slice(0, opts.perSlotLimit);
 
     const meanWith = (item: Clothing | null) =>
       item === null
         ? -1
-        : sampleCores.reduce((sum, core) => sum + evaluateOutfit([...core, item], closet).total, 0) /
+        : sampleCores.reduce((sum, core) => sum + rankOf([...core, item]), 0) /
           sampleCores.length;
 
     if (shoeOptions.length > opts.perSlotLimit) {
@@ -225,12 +232,14 @@ export const recommendOutfits = ({
 
         seen.add(key);
 
-        candidates.push({ ...evaluateOutfit(items, closet), key, core: idsKey(core) });
+        const evaluation = evaluateOutfit(items, closet);
+
+        candidates.push({ ...evaluation, key, core: idsKey(core), rank: opts.score(items, evaluation) });
       });
     });
   });
 
-  candidates.sort((a, b) => b.total - a.total || a.key.localeCompare(b.key));
+  candidates.sort((a, b) => b.rank - a.rank || a.key.localeCompare(b.key));
 
   // ④ 고르기
   let looks: FlowLook[];
