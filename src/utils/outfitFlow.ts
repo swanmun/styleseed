@@ -2,6 +2,8 @@ import type { WeatherSnapshot } from "../lib/weather";
 
 import type { Clothing, ClothingCategory } from "../types";
 
+import { warmthPenalty } from "./clothingWarmth";
+
 import { evaluateOutfit, type OutfitEvaluation } from "./outfitScore";
 
 import { getOutfitRole, isUpperRole, type OutfitRole } from "./taxonomyCompat";
@@ -45,6 +47,11 @@ export type FlowOptions = {
   // 기본 0.7: 테스트 옷장 66개 상황에서 "옷 하나로 코디" 같은 신발 반복 98% → 44%, TOP 3 평균 점수 −1.8,
   // AI 보조 심판 3명(가림) 13문제 MMR 11승 2패 (styleseed-team-docs 라운드 15)
   mmrLambda?: number | null;
+  // 날씨 두께(clo, clothingWarmth.ts): 코디 보온이 기온별 목표에서 벗어난 만큼 순위 점수에서 뺀다.
+  // 날씨가 없으면 반바지·민소매 + 따뜻한 겉옷처럼 계절이 섞인 코디만 뺀다.
+  // 기본 켬: 기온 대비 0.3 clo 넘게 벗어난 TOP 3 코디 21% → 7%(MATCH 75.6 → 75.5),
+  // AI 보조 심판 3명(가림) 6문제 5승 1패, 전원 일치 (styleseed-team-docs 라운드 16)
+  warmth?: boolean;
   // ③ 점수를 갈아 끼울 때(시험·실험용). 없으면 MATCH(evaluateOutfit의 total)
   score?: (items: Clothing[], evaluation: OutfitEvaluation) => number;
 };
@@ -79,6 +86,7 @@ const DEFAULTS: Required<FlowOptions> = {
   perSlotLimit: 6,
   diverse: true,
   mmrLambda: 0.7,
+  warmth: true,
   score: (_items, evaluation) => evaluation.total,
 };
 
@@ -149,7 +157,12 @@ export const recommendOutfits = ({
 
   const roleOf = (item: Clothing): OutfitRole => getOutfitRole(item);
 
-  const rankOf = (items: Clothing[]) => opts.score(items, evaluateOutfit(items, closet));
+  const temperature = weather ? weather.apparentTemperature ?? weather.temperature : null;
+
+  const adjust = (items: Clothing[], rank: number) =>
+    opts.warmth ? rank - warmthPenalty(items, temperature) : rank;
+
+  const rankOf = (items: Clothing[]) => adjust(items, opts.score(items, evaluateOutfit(items, closet)));
 
   const tops = pool.filter((item) => isUpperRole(roleOf(item)));
   const bottoms = pool.filter((item) => roleOf(item) === "bottom");
@@ -279,7 +292,7 @@ export const recommendOutfits = ({
 
         const evaluation = evaluateOutfit(items, closet);
 
-        candidates.push({ ...evaluation, key, core: idsKey(core), rank: opts.score(items, evaluation) });
+        candidates.push({ ...evaluation, key, core: idsKey(core), rank: adjust(items, opts.score(items, evaluation)) });
       });
     });
   });
