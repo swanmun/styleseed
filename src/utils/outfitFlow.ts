@@ -38,6 +38,13 @@ export type FlowOptions = {
   perSlotLimit?: number;
   // 상의·하의(또는 원피스)가 같은 코디는 하나만 고른다
   diverse?: boolean;
+  // ④ 고르기를 MMR(Maximal Marginal Relevance, Carbonell·Goldstein 1998)로 할 때의 λ (0~1).
+  // 다음 코디 = λ × 점수/100 − (1−λ) × (이미 고른 코디와 가장 많이 겹치는 정도) 가 가장 큰 것.
+  // 겹치는 정도 = 두 코디 옷의 자카드 유사도(같은 옷 수 ÷ 두 코디 옷 전체 수). 신발·아우터가 겹쳐도 깎인다.
+  // null이면 예전 방식(뼈대만 겹치지 않게). diverse가 false면 쓰지 않는다
+  // 기본 0.7: 테스트 옷장 66개 상황에서 "옷 하나로 코디" 같은 신발 반복 98% → 44%, TOP 3 평균 점수 −1.8,
+  // AI 보조 심판 3명(가림) 13문제 MMR 11승 2패 (styleseed-team-docs 라운드 15)
+  mmrLambda?: number | null;
   // ③ 점수를 갈아 끼울 때(시험·실험용). 없으면 MATCH(evaluateOutfit의 total)
   score?: (items: Clothing[], evaluation: OutfitEvaluation) => number;
 };
@@ -71,6 +78,7 @@ const DEFAULTS: Required<FlowOptions> = {
   maxCandidates: 4000,
   perSlotLimit: 6,
   diverse: true,
+  mmrLambda: 0.7,
   score: (_items, evaluation) => evaluation.total,
 };
 
@@ -86,6 +94,43 @@ const topBy = <T>(list: T[], score: (value: T) => number, limit: number) =>
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
     .map((entry) => entry.value);
+
+// 두 코디가 옷을 얼마나 같이 쓰나(자카드 유사도, 0~1)
+export const outfitOverlap = (a: FlowLook, b: FlowLook) => {
+  const ida = new Set(a.items.map((item) => item.id));
+  const idb = new Set(b.items.map((item) => item.id));
+  let shared = 0;
+  ida.forEach((id) => {
+    if (idb.has(id)) shared += 1;
+  });
+  return shared / (ida.size + idb.size - shared);
+};
+
+// ④ MMR 고르기. 뼈대(상의·하의 또는 원피스)가 같은 코디는 예전처럼 피하고, 모자랄 때만 허용한다
+const pickMmr = (candidates: FlowLook[], limit: number, lambda: number) => {
+  const pool = candidates.slice(0, 200); // 점수 순 상위 200개 안에서 고른다(속도)
+  const picked: FlowLook[] = [];
+  const usedCores = new Set<string>();
+  while (picked.length < limit && picked.length < pool.length) {
+    let best: FlowLook | null = null;
+    let bestValue = -Infinity;
+    const allowSameCore = pool.every((look) => picked.includes(look) || usedCores.has(look.core));
+    for (const look of pool) {
+      if (picked.includes(look)) continue;
+      if (!allowSameCore && usedCores.has(look.core)) continue;
+      const overlap = picked.length ? Math.max(...picked.map((p) => outfitOverlap(look, p))) : 0;
+      const value = lambda * (look.rank / 100) - (1 - lambda) * overlap;
+      if (value > bestValue) {
+        bestValue = value;
+        best = look;
+      }
+    }
+    if (!best) break;
+    picked.push(best);
+    usedCores.add(best.core);
+  }
+  return picked;
+};
 
 export const recommendOutfits = ({
   closet,
@@ -244,7 +289,9 @@ export const recommendOutfits = ({
   // ④ 고르기
   let looks: FlowLook[];
 
-  if (opts.diverse) {
+  if (opts.diverse && opts.mmrLambda !== null) {
+    looks = pickMmr(candidates, opts.limit, opts.mmrLambda);
+  } else if (opts.diverse) {
     const usedCores = new Set<string>();
 
     looks = [];
