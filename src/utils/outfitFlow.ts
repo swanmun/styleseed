@@ -23,7 +23,7 @@ import {
  *                 (지금 엔진처럼 신발·아우터를 1:1 궁합으로 미리 하나로 정하지 않는다)
  *   ③ 점수 하나   지금 MATCH(evaluateOutfit) 그대로. 날씨 점수는 섞지 않는다
  *   ④ 고르기     점수 순 TOP N. diverse면 상의·하의가 같은 코디는 하나만(신발·아우터만 다른 코디를 줄임)
- *   ⑤ 빈칸 찾기   코디를 완성하는 데 옷장에 없는 종류
+ *   ⑤ 빈칸 찾기   코디를 완성하는 데 옷장에 없는 종류 (상품 고르기는 gapProducts.ts)
  *
  * 입력
  *   - 옷 하나로 코디·상품 링크 코디: fixed = 그 옷(옷장에 없어도 됨)
@@ -219,6 +219,15 @@ export const recommendOutfits = ({
 
   if (!fixed && bottoms.length === 0 && dresses.length === 0) {
     missing.push("bottom");
+  }
+
+  // 고른 옷이 상의인데 하의가 없거나, 하의인데 상의가 없으면 그것도 빈칸이다(라운드 17에서 찾음)
+  if (fixed && isUpperRole(fixedRole!) && bottoms.length === 0) {
+    missing.push("bottom");
+  }
+
+  if (fixed && fixedRole === "bottom" && tops.length === 0) {
+    missing.push("top");
   }
 
   if (shoes.length === 0 && fixedRole !== "shoes") {
