@@ -98,6 +98,29 @@ test("날씨가 없으면(옷 하나로 코디) 날씨 빈칸 상품은 없다",
   assert.equal(r.kind, "none");
 });
 
+test("쓰임새: 옷장 여러 옷과 맞는 신발이 고른 옷 하나에만 맞는 신발보다 쓰임새 점수가 높다", () => {
+  const SUMMER = ["summer"], COLD = ["fall", "winter"];
+  const closet = [
+    c(1, "top", "sleeveless", "white", "cotton", { season: SUMMER }),
+    c(2, "bottom", "shorts", "gray", "cotton", { season: SUMMER }),
+    c(3, "top", "hoodie", "gray", "cotton", { season: COLD }),
+    c(4, "top", "sweatshirt", "navy", "cotton", { season: COLD }),
+    c(5, "bottom", "jeans", "blue", "denim", { season: COLD }),
+  ];
+  const sandals = c(-1, "shoes", "sandals", "black", "other", { season: SUMMER });
+  const sneakers = c(-2, "shoes", "sneakers", "white", "leather", { season: ALL });
+  const r = G.suggestGapProducts({ closet, fixed: closet[1], catalog: [sandals, sneakers], versatility: 1 });
+  const v = Object.fromEntries(r.suggestions.map((s) => [s.product.id, s.versatility]));
+  assert.ok(v[sneakers.id] > v[sandals.id], JSON.stringify(v));
+  assert.equal(r.suggestions[0].product.id, sneakers.id);
+  // 쓰임새 0이면 예전처럼 지금 코디 점수만 본다
+  const r0 = G.suggestGapProducts({ closet, fixed: closet[1], catalog: [sandals, sneakers], versatility: 0 });
+  r0.suggestions.forEach((s) => {
+    assert.equal(s.versatility, null);
+    assert.equal(s.score, s.look.rank);
+  });
+});
+
 test("상품 → 옷 모양: id는 음수, 빈 계절은 빈 목록", () => {
   const x = G.productToClothing({ id: 7, name: "P", brand: "B", category: "shoes", subCategory: "loafer", color: "brown", material: "leather", style: "classic", price: 1 });
   assert.equal(x.id, -7);

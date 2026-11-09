@@ -4,6 +4,8 @@ import { warmthGap } from "./clothingWarmth";
 
 import { recommendOutfits, type FlowInput, type FlowLook } from "./outfitFlow";
 
+import { buildWeatherPool, getWeatherRule } from "./weatherRecommendation";
+
 import { getOutfitRole, isUpperRole } from "./taxonomyCompat";
 
 /**
@@ -33,7 +35,18 @@ import { getOutfitRole, isUpperRole } from "./taxonomyCompat";
  * 주의: 채점표는 비어 있는 칸(계절·TPO)을 감점하지 않는다. 상품 속성이 비어 있으면 점수가 부풀려지므로
  *      상품도 옷장 옷과 같은 속성 분석(POST /analyze-clothing)을 거쳐 칸을 채운 뒤 넣어야 한다(라운드 17에서 찾음).
  *
- * 아직 하지 않은 것: 쓰임새(이 상품이 옷장의 옷 몇 벌과 어울리나)를 점수에 넣기, 가격·예산, 큰 카탈로그용 후보 줄이기.
+ * 3) 쓰임새 (versatility, 라운드 18 질문 66)
+ *    지금 코디 하나에만 맞는 상품(민소매에만 맞는 슬라이드, 그래픽 티에만 맞는 트랙 팬츠)을 피한다.
+ *    옷장의 다른 옷(기준 옷: 신발이면 상의·하의·원피스, 하의면 상의 …)을 하나씩 "이 옷으로 코디"의 고른 옷으로 놓고,
+ *    상품을 더한 옷장에서 나오는 가장 좋은 코디의 순위 점수를 평균한다.
+ *    = 캡슐 옷장 논문의 궁합 항목 C(옷장 안 코디들의 궁합)가 상품 하나로 늘어나는 양. 상품이 안 쓰인 기준 옷은
+ *      상품이 없을 때와 점수가 같아 늘어난 양이 0이다(어느 상품이든 같은 기준이라 평균으로 줄 세워도 된다).
+ *    최종 점수 = (1 − w) × 지금 코디 점수 + w × 쓰임새. w 기본 1: 그 종류가 옷장에 하나도 없으면 산 상품은
+ *    앞으로 그 종류가 필요한 모든 코디에 들어가므로, 옷장 전체에서 늘어나는 값만 보는 것이 캡슐 옷장 목표와 같다.
+ *    (라운드 18: w 0.5는 57개 상황 중 12개만 바뀌어 거의 차이가 없었다. w 1 vs 0 AI 보조 심판 3승 1패 1무.
+ *     다만 w 1도 지금 앱의 정해 둔 답과는 5승 6패 — 계절에 따라 못 쓰는 옷(첼시 부츠·슬라이드)과 격식은 아직 못 본다)
+ *
+ * 아직 하지 않은 것: 가격·예산, 큰 카탈로그용 후보 줄이기(상품 수 × 기준 옷 수만큼 하나의 흐름을 돈다).
  */
 
 export type GapSuggestion = {
@@ -44,8 +57,12 @@ export type GapSuggestion = {
   fills: ClothingCategory | null;
   // 이 상품이 들어간 가장 좋은 코디
   look: FlowLook;
-  // fill: 그 코디의 순위 점수 / warmth: 지금 가장 좋은 코디보다 오른 순위 점수(음수일 수 있음: 날씨는 안전 규칙이라 취향 점수가 조금 내려가도 권한다)
+  // fill: 줄 세운 점수(score와 같음) / warmth: 지금 가장 좋은 코디보다 오른 순위 점수(음수일 수 있음: 날씨는 안전 규칙이라 취향 점수가 조금 내려가도 권한다)
   value: number;
+  // 쓰임새: 기준 옷마다 가장 좋은 코디 순위 점수의 평균(기준 옷이 없으면 null)
+  versatility: number | null;
+  // 줄 세운 점수 = (1 − w) × look.rank + w × versatility
+  score: number;
   // warmth일 때 보온 차이(clo, +덥게 −춥게): 지금 → 산 뒤
   warmthGap?: { before: number; after: number };
 };
@@ -60,6 +77,8 @@ export type GapInput = FlowInput & {
   needGap?: number;
   // 상품으로 인정할 최소 보온 개선(clo)
   minCloGain?: number;
+  // 쓰임새 무게 w (0~1, 기본 1). 0이면 지금 코디 하나만 본다(라운드 17 방식)
+  versatility?: number;
 };
 
 export type GapResult = {
@@ -105,6 +124,7 @@ export const suggestGapProducts = ({
   limit = 3,
   needGap = 0.3,
   minCloGain = 0.1,
+  versatility = 1,
   ...flow
 }: GapInput): GapResult => {
   const closetIds = new Set(flow.closet.map((item) => item.id));
@@ -128,6 +148,52 @@ export const suggestGapProducts = ({
     return look && look.items.some((item) => item.id === product.id) ? look : null;
   };
 
+  // 쓰임새의 기준 옷: 상품과 같이 입을 옷 중 오늘 날씨에 입을 수 있는 것
+  const wearable = flow.weather
+    ? buildWeatherPool(flow.closet, getWeatherRule(flow.weather)).pool
+    : flow.closet;
+
+  const anchorsFor = (product: Clothing) => {
+    const role = getOutfitRole(product);
+
+    return wearable.filter((item) => {
+      const other = getOutfitRole(item);
+
+      if (role === "shoes") return isUpperRole(other) || other === "bottom" || other === "onePiece";
+      if (role === "bottom") return isUpperRole(other);
+      if (isUpperRole(role)) return other === "bottom";
+      if (role === "onePiece") return other === "shoes";
+      if (role === "outer") return isUpperRole(other) || other === "onePiece";
+
+      return false;
+    });
+  };
+
+  const versatilityOf = (product: Clothing) => {
+    const anchors = anchorsFor(product);
+
+    if (anchors.length === 0) return null;
+
+    const ranks = anchors.map((anchor) => {
+      const look = recommendOutfits({
+        closet: [...flow.closet, product],
+        fixed: anchor,
+        weather: flow.weather,
+        options: { ...flow.options, limit: 1 },
+      }).looks[0];
+
+      return look ? look.rank : 0;
+    });
+
+    return ranks.reduce((sum, rank) => sum + rank, 0) / ranks.length;
+  };
+
+  const scored = (product: Clothing, look: FlowLook) => {
+    const v = versatility > 0 ? versatilityOf(product) : null;
+
+    return { versatility: v, score: v === null ? look.rank : (1 - versatility) * look.rank + versatility * v };
+  };
+
   if (base.missing.length > 0) {
     const suggestions: GapSuggestion[] = [];
 
@@ -140,7 +206,9 @@ export const suggestGapProducts = ({
           const look = bestWith(product);
 
           if (look) {
-            ranked.push({ product, kind: "fill", fills: category, look, value: look.rank });
+            const extra = scored(product, look);
+
+            ranked.push({ product, kind: "fill", fills: category, look, value: extra.score, ...extra });
           }
         });
 
@@ -176,16 +244,16 @@ export const suggestGapProducts = ({
     const gain = look.rank - baseLook.rank;
 
     if (Math.abs(before) - Math.abs(after) >= minCloGain) {
-      ranked.push({ product, kind: "warmth", fills: null, look, value: gain, warmthGap: { before, after } });
+      ranked.push({ product, kind: "warmth", fills: null, look, value: gain, warmthGap: { before, after }, ...scored(product, look) });
     }
   });
 
-  // 날씨를 맞춰 주는 상품 먼저, 그 안에서 순위 점수(MATCH − 두께 감점) 높은 순
+  // 날씨를 맞춰 주는 상품 먼저, 그 안에서 점수(지금 코디 + 쓰임새) 높은 순
   const fixesWeather = (x: GapSuggestion) => (Math.abs(x.warmthGap!.after) <= needGap ? 1 : 0);
 
   ranked.sort(
     (a, b) =>
-      fixesWeather(b) - fixesWeather(a) || b.look.rank - a.look.rank || a.product.id - b.product.id,
+      fixesWeather(b) - fixesWeather(a) || b.score - a.score || a.product.id - b.product.id,
   );
 
   return {
