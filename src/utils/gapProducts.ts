@@ -94,6 +94,8 @@ export type GapInput = FlowInput & {
   seasonTemps?: number[] | null;
   // 빈칸 채우기에서 오늘 기온을 맞춰 주는 상품을 먼저 세운다(기본 켬). false면 라운드 17·18 방식
   weatherFirst?: boolean;
+  // 상품 후보 목록(limit개)을 MMR로 고를 때의 λ(기본 0.7, 라운드 15 코디 TOP 3와 같은 값). null이면 점수 순 그대로(라운드 19까지)
+  productLambda?: number | null;
 };
 
 export type GapResult = {
@@ -142,6 +144,7 @@ export const suggestGapProducts = ({
   versatility = 1,
   seasonTemps = [5, 15, 25],
   weatherFirst = true,
+  productLambda = 0.7,
   ...flow
 }: GapInput): GapResult => {
   const closetIds = new Set(flow.closet.map((item) => item.id));
@@ -255,6 +258,45 @@ export const suggestGapProducts = ({
 
   const todayTemp = flow.weather ? flow.weather.apparentTemperature ?? flow.weather.temperature : null;
 
+  // 상품 후보 목록 고르기(라운드 20 질문 72, 찾은 문제 P20: 흰 스니커즈와 흰 가죽 스니커즈가 같이 나옴)
+  // MMR(Carbonell·Goldstein 1998, 라운드 15와 같은 방법): 다음 상품 = λ × 점수/100 − (1−λ) × 이미 고른 상품과 가장 비슷한 정도.
+  // 비슷한 정도 = 세부종류와 색이 둘 다 같으면 1(사용자 눈에 거의 같은 상품, 예: 흰 스니커즈 vs 흰 가죽 스니커즈), 아니면 0.
+  //   라운드 20에서 두 번 바꿨다: ① 세부종류 0.5 + 색 0.5 → 검정 로퍼와 색이 겹친다며 검정 메리제인을 밀어냄
+  //   ② 세부종류만 같아도 0.5 → 상품 목록이 작으면 슬랙스 두 벌 대신 플리츠 스커트, 스니커즈 두 켤레 대신 메리제인이 끼어듦.
+  //   그래서 P20이 지적한 "거의 같은 상품"만 겹침으로 본다.
+  // 안전 단계(오늘 기온을 맞추는가)는 그대로 먼저 본다. 1위는 늘 점수 1위 그대로다.
+  const similarity = (a: Clothing, b: Clothing) =>
+    a.subCategory === b.subCategory && a.color === b.color ? 1 : 0;
+
+  const pickProducts = (ranked: GapSuggestion[], tier: (x: GapSuggestion) => number) => {
+    if (productLambda === null) return ranked.slice(0, limit);
+
+    const picked: GapSuggestion[] = [];
+
+    const pool = [...ranked];
+
+    while (picked.length < limit && pool.length > 0) {
+      let best = 0;
+
+      let bestKey = -Infinity;
+
+      pool.forEach((candidate, index) => {
+        const maxSim = picked.reduce((m, x) => Math.max(m, similarity(candidate.product, x.product)), 0);
+
+        const key = tier(candidate) * 10 + productLambda * (candidate.score / 100) - (1 - productLambda) * maxSim;
+
+        if (key > bestKey) {
+          bestKey = key;
+          best = index;
+        }
+      });
+
+      picked.push(pool.splice(best, 1)[0]);
+    }
+
+    return picked;
+  };
+
   if (base.missing.length > 0) {
     const suggestions: GapSuggestion[] = [];
 
@@ -281,7 +323,7 @@ export const suggestGapProducts = ({
 
       ranked.sort((a, b) => okToday(b) - okToday(a) || b.value - a.value || a.product.id - b.product.id);
 
-      suggestions.push(...ranked.slice(0, limit));
+      suggestions.push(...pickProducts(ranked, okToday));
     });
 
     return { kind: "fill", baseLook, missing: base.missing, suggestions };
@@ -327,6 +369,6 @@ export const suggestGapProducts = ({
     kind: ranked.length > 0 ? "warmth" : "none",
     baseLook,
     missing: [],
-    suggestions: ranked.slice(0, limit),
+    suggestions: pickProducts(ranked, fixesWeather),
   };
 };

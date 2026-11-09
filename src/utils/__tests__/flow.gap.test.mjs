@@ -148,6 +148,18 @@ test("오늘 날씨 먼저: 0도에 겉옷이 없으면 쓰임새가 넓어도 �
   assert.equal(off.suggestions.length, 2);
 });
 
+test("상품 목록 MMR: 거의 같은 상품(세부종류·색 같음)은 목록에 같이 넣지 않고, 1위는 그대로", () => {
+  const sneakerA = c(-1, "shoes", "sneakers", "white", "leather");
+  const sneakerB = c(-2, "shoes", "sneakers", "white", "cotton");
+  const loafer = c(-3, "shoes", "loafer", "black", "leather");
+  const catalog = [sneakerA, sneakerB, loafer];
+  const on = G.suggestGapProducts({ closet: closetNoShoes, catalog, limit: 2 });
+  const off = G.suggestGapProducts({ closet: closetNoShoes, catalog, limit: 2, productLambda: null });
+  assert.equal(on.suggestions[0].product.id, off.suggestions[0].product.id);
+  const sameish = (list) => list[0].product.subCategory === list[1].product.subCategory && list[0].product.color === list[1].product.color;
+  assert.equal(sameish(on.suggestions), false);
+});
+
 test("상품 → 옷 모양: id는 음수, 빈 계절은 빈 목록", () => {
   const x = G.productToClothing({ id: 7, name: "P", brand: "B", category: "shoes", subCategory: "loafer", color: "brown", material: "leather", style: "classic", price: 1 });
   assert.equal(x.id, -7);

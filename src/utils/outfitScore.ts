@@ -442,6 +442,29 @@ const getTags = (items: Clothing[]) => {
   return tags;
 };
 
+/**
+ * 지표 6개 점수를 총점으로 합친다(가중합 × 완성도 × 약점 감점).
+ * evaluateOutfit과 시험용 채점표(overlapScore.ts)가 같은 식을 쓰도록 밖으로 꺼냈다(동작은 그대로).
+ */
+export const combineOutfitScore = (
+  details: Pick<OutfitScoreDetail, "key" | "score">[],
+  completeness: number,
+) => {
+  const weighted = details.reduce(
+    (sum, detail) => sum + detail.score * WEIGHTS[detail.key],
+    0,
+  );
+
+  // 한 지표라도 크게 어긋나면(계절대가 겹치지 않는 등) 총점을 더 깎는다.
+  const weakestScore = Math.min(...details.map((detail) => detail.score));
+
+  const weakestPenalty =
+    weakestScore < 40 ? 0.88 : weakestScore < 55 ? 0.94 : 1;
+
+  // 구성이 빠진 코디는 최대 18%까지 감점
+  return Math.round(weighted * (0.82 + 0.18 * completeness) * weakestPenalty);
+};
+
 export const evaluateOutfit = (
   items: Clothing[],
   closet: Clothing[],
@@ -467,23 +490,9 @@ export const evaluateOutfit = (
     { key: "preference", label: "Preference", ...preference },
   ];
 
-  const weighted = details.reduce(
-    (sum, detail) => sum + detail.score * WEIGHTS[detail.key],
-    0,
-  );
-
   const completeness = getCompleteness(items);
 
-  // 한 지표라도 크게 어긋나면(계절대가 겹치지 않는 등) 총점을 더 깎는다.
-  const weakestScore = Math.min(...details.map((detail) => detail.score));
-
-  const weakestPenalty =
-    weakestScore < 40 ? 0.88 : weakestScore < 55 ? 0.94 : 1;
-
-  // 구성이 빠진 코디는 최대 18%까지 감점
-  const total = Math.round(
-    weighted * (0.82 + 0.18 * completeness) * weakestPenalty,
-  );
+  const total = combineOutfitScore(details, completeness);
 
   // 점수가 높은 지표 3개를 추천 이유로 보여준다.
   const reasons = [...details]
