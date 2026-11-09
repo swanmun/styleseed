@@ -46,6 +46,7 @@ const BASE_CLO: Record<string, number> = {
   padding: 0.6, // ≈ 패딩(표에 없음, 두꺼운 코트 0.48보다 따뜻하게)
   // 신발
   boots: 0.1, // Boots
+  "long-boots": 0.1, // ≈ Boots (롱부츠. 앱 분류에는 아직 없음, 라운드 23)
   sneakers: 0.02, // Shoes or sandals
   loafer: 0.02,
   heels: 0.02,

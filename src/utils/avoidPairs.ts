@@ -20,6 +20,11 @@ import { getOutfitRole, isUpperRole, type OutfitRole } from "./taxonomyCompat";
  *   - 티셔츠 × 코트·패딩: 8번 / 우연 36.1번(0.23)
  *     AI 심판: "반팔 티에 카멜 코트는 계절이 섞였다"(라운드 20b)
  *
+ *   - 롱부츠 × 긴 바지(슬랙스·면바지·청바지): 1번 / 우연 25.0번(0.06). 반대로 롱부츠 × 치마·원피스는 49번 / 23.1번(2.10배)
+ *     AI 심판: "와이드 슬랙스에 롱부츠는 부츠가 가려진다"(라운드 14부터 여러 번, 실루엣 ㉰). 라운드 23
+ *     ※ 앱 분류에는 롱부츠·앵클부츠 구분이 없다(신발 세부종류는 boots 하나). 그래서 이 규칙은 세부종류 "long-boots"가
+ *       생겨야 작동한다(담당자 상의). 앵클·첼시 부츠 × 와이드 바지는 0.53배로 피하는 짝이 아니다.
+ *
  * 넣지 않은 것: 니트 위에 가디건(데이터 배수 0.85, 피한다는 근거 없음),
  *               캐미솔 한 장(정답 코디는 거의 모두 겉옷이 있어 잴 수 없음).
  *
@@ -50,6 +55,12 @@ export const AVOID_RULES: AvoidRule[] = [
     a: { roles: UPPER, subCategories: ["tshirt"] },
     b: { roles: ["outer"], subCategories: ["coat", "padding"] },
     evidence: "정답 코디 8번 / 우연 36.1번(배수 0.23)",
+  },
+  {
+    id: "long-boots-long-pants",
+    a: { roles: ["shoes"], subCategories: ["long-boots"] },
+    b: { roles: ["bottom"], subCategories: ["slacks", "trousers", "jeans"] },
+    evidence: "정답 코디 1번 / 우연 25.0번(배수 0.06)",
   },
 ];
 
