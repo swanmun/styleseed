@@ -1,3 +1,5 @@
+import type { WeatherSnapshot } from "../lib/weather";
+
 import type { Clothing, ClothingCategory, Product } from "../types";
 
 import { warmthGap } from "./clothingWarmth";
@@ -46,6 +48,15 @@ import { getOutfitRole, isUpperRole } from "./taxonomyCompat";
  *    (라운드 18: w 0.5는 57개 상황 중 12개만 바뀌어 거의 차이가 없었다. w 1 vs 0 AI 보조 심판 3승 1패 1무.
  *     다만 w 1도 지금 앱의 정해 둔 답과는 5승 6패 — 계절에 따라 못 쓰는 옷(첼시 부츠·슬라이드)과 격식은 아직 못 본다)
  *
+ * 4) 사계절 쓰임새 (라운드 19 질문 68)
+ *    쓰임새를 오늘 날씨 하나로만 재면 첼시 부츠(가을·겨울용)도 사계절 옷과 다 맞는 것처럼 나온다(라운드 18 P17).
+ *    그 종류가 옷장에 하나뿐이면 일 년 내내 그것만 쓴다. 그래서 대표 기온 몇 개(seasonTemps, 기본 5·15·25도 =
+ *    겨울 문턱·봄가을·여름, 라운드 16의 한국 기온별 옷차림 표 구간)에서 각각 기준 옷마다 코디를 만들어 본다.
+ *    기온마다 평균을 낸 뒤 기온끼리 다시 평균한다(계절마다 같은 무게). 오늘 날씨가 있으면 그 기온도 하나 더 넣는다.
+ *    그 기온에 상품을 못 쓰면(날씨에 걸러져 그 자리가 빈 코디가 되면) 그 기준 옷은 0점이다. 겉옷이 필요 없는 기온에
+ *    겉옷을 안 입는 것은 실패가 아니다(그 코디 점수를 그대로 쓴다 → 어느 겉옷이든 같은 점수라 순위에 영향 없음).
+ *    캡슐 옷장 논문의 V(쓰임새: 여러 상황을 두루 덮는가)를 "여러 계절을 두루 덮는가"로 옮긴 것이다.
+ *
  * 아직 하지 않은 것: 가격·예산, 큰 카탈로그용 후보 줄이기(상품 수 × 기준 옷 수만큼 하나의 흐름을 돈다).
  */
 
@@ -79,6 +90,10 @@ export type GapInput = FlowInput & {
   minCloGain?: number;
   // 쓰임새 무게 w (0~1, 기본 1). 0이면 지금 코디 하나만 본다(라운드 17 방식)
   versatility?: number;
+  // 쓰임새를 잴 대표 기온(°C). 기본 [5, 15, 25]. null이면 오늘 날씨 하나로만 잰다(라운드 18 방식)
+  seasonTemps?: number[] | null;
+  // 빈칸 채우기에서 오늘 기온을 맞춰 주는 상품을 먼저 세운다(기본 켬). false면 라운드 17·18 방식
+  weatherFirst?: boolean;
 };
 
 export type GapResult = {
@@ -125,6 +140,8 @@ export const suggestGapProducts = ({
   needGap = 0.3,
   minCloGain = 0.1,
   versatility = 1,
+  seasonTemps = [5, 15, 25],
+  weatherFirst = true,
   ...flow
 }: GapInput): GapResult => {
   const closetIds = new Set(flow.closet.map((item) => item.id));
@@ -148,13 +165,40 @@ export const suggestGapProducts = ({
     return look && look.items.some((item) => item.id === product.id) ? look : null;
   };
 
-  // 쓰임새의 기준 옷: 상품과 같이 입을 옷 중 오늘 날씨에 입을 수 있는 것
-  const wearable = flow.weather
-    ? buildWeatherPool(flow.closet, getWeatherRule(flow.weather)).pool
-    : flow.closet;
+  // 쓰임새를 잴 날씨들: 오늘 날씨(있으면) + 대표 기온. 대표 기온이 없으면 오늘 날씨 하나(없으면 날씨 없음)
+  const atTemp = (temperature: number): WeatherSnapshot => ({
+    temperature,
+    apparentTemperature: temperature,
+    kind: "clear",
+    label: "맑음",
+    isDay: true,
+    city: null,
+    observedAt: flow.weather?.observedAt ?? "",
+  });
 
-  const anchorsFor = (product: Clothing) => {
+  const contexts: (WeatherSnapshot | null)[] =
+    seasonTemps && seasonTemps.length > 0
+      ? [...(flow.weather ? [flow.weather] : []), ...seasonTemps.map(atTemp)]
+      : [flow.weather ?? null];
+
+  // 상품이 채우는 자리
+  const slotOf = (product: Clothing): ClothingCategory[] => {
     const role = getOutfitRole(product);
+
+    if (role === "shoes") return ["shoes"];
+    if (role === "bottom") return ["bottom"];
+    if (isUpperRole(role)) return ["top"];
+    if (role === "outer") return ["outer"];
+    if (role === "onePiece") return ["top", "bottom"];
+
+    return [];
+  };
+
+  // 기준 옷: 상품과 같이 입을 옷 중 그 날씨에 입을 수 있는 것
+  const anchorsFor = (product: Clothing, weather: WeatherSnapshot | null) => {
+    const role = getOutfitRole(product);
+
+    const wearable = weather ? buildWeatherPool(flow.closet, getWeatherRule(weather)).pool : flow.closet;
 
     return wearable.filter((item) => {
       const other = getOutfitRole(item);
@@ -170,22 +214,37 @@ export const suggestGapProducts = ({
   };
 
   const versatilityOf = (product: Clothing) => {
-    const anchors = anchorsFor(product);
+    const slots = slotOf(product);
 
-    if (anchors.length === 0) return null;
+    const perContext: number[] = [];
 
-    const ranks = anchors.map((anchor) => {
-      const look = recommendOutfits({
-        closet: [...flow.closet, product],
-        fixed: anchor,
-        weather: flow.weather,
-        options: { ...flow.options, limit: 1 },
-      }).looks[0];
+    contexts.forEach((weather) => {
+      const anchors = anchorsFor(product, weather);
 
-      return look ? look.rank : 0;
+      if (anchors.length === 0) return;
+
+      const ranks = anchors.map((anchor) => {
+        const result = recommendOutfits({
+          closet: [...flow.closet, product],
+          fixed: anchor,
+          weather,
+          options: { ...flow.options, limit: 1 },
+        });
+
+        const look = result.looks[0];
+
+        // 그 날씨에 상품을 못 써서 그 자리가 비면 실패(0점)
+        if (!look || result.missing.some((category) => slots.includes(category))) return 0;
+
+        return look.rank;
+      });
+
+      perContext.push(ranks.reduce((sum, rank) => sum + rank, 0) / ranks.length);
     });
 
-    return ranks.reduce((sum, rank) => sum + rank, 0) / ranks.length;
+    return perContext.length > 0
+      ? perContext.reduce((sum, value) => sum + value, 0) / perContext.length
+      : null;
   };
 
   const scored = (product: Clothing, look: FlowLook) => {
@@ -193,6 +252,8 @@ export const suggestGapProducts = ({
 
     return { versatility: v, score: v === null ? look.rank : (1 - versatility) * look.rank + versatility * v };
   };
+
+  const todayTemp = flow.weather ? flow.weather.apparentTemperature ?? flow.weather.temperature : null;
 
   if (base.missing.length > 0) {
     const suggestions: GapSuggestion[] = [];
@@ -212,7 +273,13 @@ export const suggestGapProducts = ({
           }
         });
 
-      ranked.sort((a, b) => b.value - a.value || a.product.id - b.product.id);
+      // 오늘 날씨가 있으면 오늘 기온을 맞춰 주는 상품(산 뒤 코디 보온이 목표에서 needGap 안)을 먼저 세운다.
+      // 날씨는 안전 규칙이라 쓰임새보다 앞선다(결정 44). 라운드 19: 사계절 쓰임새만 보면 0도에 숏패딩 대신
+      // 바람막이를 골랐다(숏패딩은 15·25도에 못 입어 평균이 깎임)
+      const okToday = (x: GapSuggestion) =>
+        !weatherFirst || todayTemp === null || Math.abs(warmthGap(x.look.items, todayTemp)) <= needGap ? 1 : 0;
+
+      ranked.sort((a, b) => okToday(b) - okToday(a) || b.value - a.value || a.product.id - b.product.id);
 
       suggestions.push(...ranked.slice(0, limit));
     });
@@ -220,7 +287,7 @@ export const suggestGapProducts = ({
     return { kind: "fill", baseLook, missing: base.missing, suggestions };
   }
 
-  const temperature = flow.weather ? flow.weather.apparentTemperature ?? flow.weather.temperature : null;
+  const temperature = todayTemp;
 
   if (!baseLook || temperature === null) {
     return { kind: "none", baseLook, missing: base.missing, suggestions: [] };

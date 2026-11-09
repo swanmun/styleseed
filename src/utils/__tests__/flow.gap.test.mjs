@@ -121,6 +121,33 @@ test("쓰임새: 옷장 여러 옷과 맞는 신발이 고른 옷 하나에만 �
   });
 });
 
+test("사계절 쓰임새: 날씨에 걸러지는 기온이 있으면 그 기온의 기준 옷은 0점이라 쓰임새가 낮다", () => {
+  const closet = [
+    c(1, "top", "tshirt", "white"), c(2, "top", "knit", "beige", "knit"),
+    c(3, "bottom", "jeans", "blue", "denim"), c(4, "bottom", "slacks", "black"),
+  ];
+  const padding = c(-1, "outer", "padding", "black", "nylon", { season: ["winter"] });
+  const both = G.suggestGapProducts({ closet, catalog: [padding], weather: weather(0) });
+  const one = G.suggestGapProducts({ closet, catalog: [padding], weather: weather(0), seasonTemps: null });
+  // 사계절로 재면 15·25도 몫까지 평균하므로 오늘(0도) 하나로 잰 쓰임새와 다르다
+  assert.notEqual(both.suggestions[0].versatility, one.suggestions[0].versatility);
+});
+
+test("오늘 날씨 먼저: 0도에 겉옷이 없으면 쓰임새가 넓어도 얇은 겉옷보다 기온을 맞추는 겉옷이 먼저", () => {
+  const closet = [
+    c(1, "top", "knit", "beige", "knit"), c(2, "top", "shirt", "white"),
+    c(3, "bottom", "jeans", "blue", "denim"), c(4, "bottom", "slacks", "black"),
+    c(5, "shoes", "boots", "brown", "leather"),
+  ];
+  const padding = c(-1, "outer", "padding", "black", "nylon");
+  const cardigan = c(-2, "outer", "cardigan", "gray", "cotton");
+  const r = G.suggestGapProducts({ closet, catalog: [cardigan, padding], weather: weather(0) });
+  assert.equal(r.kind, "fill");
+  assert.equal(r.suggestions[0].product.id, padding.id);
+  const off = G.suggestGapProducts({ closet, catalog: [cardigan, padding], weather: weather(0), weatherFirst: false });
+  assert.equal(off.suggestions.length, 2);
+});
+
 test("상품 → 옷 모양: id는 음수, 빈 계절은 빈 목록", () => {
   const x = G.productToClothing({ id: 7, name: "P", brand: "B", category: "shoes", subCategory: "loafer", color: "brown", material: "leather", style: "classic", price: 1 });
   assert.equal(x.id, -7);
