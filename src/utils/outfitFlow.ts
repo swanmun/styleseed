@@ -2,6 +2,8 @@ import type { WeatherSnapshot } from "../lib/weather";
 
 import type { Clothing, ClothingCategory } from "../types";
 
+import { avoidPenalty } from "./avoidPairs";
+
 import { warmthPenalty } from "./clothingWarmth";
 
 import { evaluateOutfit, type OutfitEvaluation } from "./outfitScore";
@@ -52,6 +54,9 @@ export type FlowOptions = {
   // 기본 켬: 기온 대비 0.3 clo 넘게 벗어난 TOP 3 코디 21% → 7%(MATCH 75.6 → 75.5),
   // AI 보조 심판 3명(가림) 6문제 5승 1패, 전원 일치 (styleseed-team-docs 라운드 16)
   warmth?: boolean;
+  // 피하는 짝(avoidPairs.ts): AI 보조 심판이 짚고 정답 코디도 피하는 짝(네이비 ↔ 검정 겉옷·하의, 티셔츠 × 코트·패딩)이면
+  // 짝마다 순위 점수 10점을 뺀다(styleseed-team-docs 라운드 22)
+  avoid?: boolean;
   // ③ 점수를 갈아 끼울 때(시험·실험용). 없으면 MATCH(evaluateOutfit의 total)
   score?: (items: Clothing[], evaluation: OutfitEvaluation) => number;
 };
@@ -87,6 +92,7 @@ const DEFAULTS: Required<FlowOptions> = {
   diverse: true,
   mmrLambda: 0.7,
   warmth: true,
+  avoid: false,
   score: (_items, evaluation) => evaluation.total,
 };
 
@@ -160,7 +166,7 @@ export const recommendOutfits = ({
   const temperature = weather ? weather.apparentTemperature ?? weather.temperature : null;
 
   const adjust = (items: Clothing[], rank: number) =>
-    opts.warmth ? rank - warmthPenalty(items, temperature) : rank;
+    rank - (opts.warmth ? warmthPenalty(items, temperature) : 0) - (opts.avoid ? avoidPenalty(items) : 0);
 
   const rankOf = (items: Clothing[]) => adjust(items, opts.score(items, evaluateOutfit(items, closet)));
 
