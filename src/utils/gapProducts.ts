@@ -96,6 +96,13 @@ export type GapInput = FlowInput & {
   weatherFirst?: boolean;
   // 상품 후보 목록(limit개)을 MMR로 고를 때의 λ(기본 0.7, 라운드 15 코디 TOP 3와 같은 값). null이면 점수 순 그대로(라운드 19까지)
   productLambda?: number | null;
+  // 날씨 빈칸을 두 갈래로도 돌려준다(시험용, 기본 꺼짐. 라운드 28 질문 86, 찾은 문제 P25). 켜도 suggestions는 그대로다.
+  //   style: 지금보다 따뜻해지면서(minCloGain 이상) 코디 점수(rank)가 지금 가장 좋은 코디보다 떨어지지 않는 상품 = 파레토 개선
+  //          (Ribeiro 외 RecSys 2012 파레토 효율). 비어 있으면 옷장과 어울리면서 더 따뜻한 상품이 없다는 뜻(지금 옷장 코디 baseLook을 보여 줌. 추운 건 그대로일 수 있음).
+  //   warm:  지금과 같은 순서(오늘 기온을 맞추는 상품 먼저) = suggestions.
+  //   화면은 줄마다 이름을 붙인 여러 줄(carousel, Ferrari Dacrema 외 2021·2022)로 보여 주는 것을 생각했다.
+  //   라운드 27 설문 3번: 페미닌 옷장 −5도에 숏패딩은 기온을 다 못 맞추면서(−0.48 → −0.31) 점수를 낮춤(55.9 → 48.7), 사람은 "안 권함".
+  warmthTracks?: boolean;
 };
 
 export type GapResult = {
@@ -104,6 +111,8 @@ export type GapResult = {
   baseLook: FlowLook | null;
   missing: ClothingCategory[];
   suggestions: GapSuggestion[];
+  // warmthTracks를 켜고 날씨 빈칸일 때만
+  tracks?: { style: GapSuggestion[]; warm: GapSuggestion[] };
 };
 
 /**
@@ -145,6 +154,7 @@ export const suggestGapProducts = ({
   seasonTemps = [5, 15, 25],
   weatherFirst = true,
   productLambda = 0.7,
+  warmthTracks = false,
   ...flow
 }: GapInput): GapResult => {
   const closetIds = new Set(flow.closet.map((item) => item.id));
@@ -365,10 +375,22 @@ export const suggestGapProducts = ({
       fixesWeather(b) - fixesWeather(a) || b.score - a.score || a.product.id - b.product.id,
   );
 
+  const suggestions = pickProducts(ranked, fixesWeather);
+
+  if (!warmthTracks) {
+    return { kind: ranked.length > 0 ? "warmth" : "none", baseLook, missing: [], suggestions };
+  }
+
+  // 스타일 갈래: 코디 점수가 떨어지지 않는 상품만, 점수(지금 코디 + 쓰임새) 높은 순
+  const styleRanked = ranked
+    .filter((x) => x.look.rank >= baseLook.rank)
+    .sort((a, b) => b.score - a.score || a.product.id - b.product.id);
+
   return {
     kind: ranked.length > 0 ? "warmth" : "none",
     baseLook,
     missing: [],
-    suggestions: pickProducts(ranked, fixesWeather),
+    suggestions,
+    tracks: { style: pickProducts(styleRanked, () => 0), warm: suggestions },
   };
 };

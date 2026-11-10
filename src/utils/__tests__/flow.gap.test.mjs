@@ -160,6 +160,24 @@ test("상품 목록 MMR: 거의 같은 상품(세부종류·색 같음)은 목�
   assert.equal(sameish(on.suggestions), false);
 });
 
+test("날씨 빈칸 두 갈래(라운드 28): 기본은 없음, 켜면 스타일 갈래는 코디 점수가 안 떨어지는 상품만, 따뜻함 갈래 = suggestions", () => {
+  const closet = [
+    c(1, "top", "knit", "beige", "knit"), c(3, "bottom", "jeans", "blue", "denim"),
+    c(5, "shoes", "boots", "brown", "leather"), c(6, "outer", "cardigan", "gray", "knit"),
+  ];
+  const catalog = [c(-5, "outer", "padding", "black", "nylon"), c(-7, "outer", "coat", "camel", "wool"), c(-8, "outer", "padding", "pink", "nylon", { style: ["street"] })];
+  const off = G.suggestGapProducts({ closet, weather: weather(0), catalog });
+  assert.equal(off.kind, "warmth");
+  assert.equal(off.tracks, undefined);
+  const on = G.suggestGapProducts({ closet, weather: weather(0), catalog, warmthTracks: true });
+  assert.deepEqual(on.suggestions.map((s) => s.product.id), off.suggestions.map((s) => s.product.id), "켜도 suggestions는 그대로");
+  assert.deepEqual(on.tracks.warm.map((s) => s.product.id), on.suggestions.map((s) => s.product.id));
+  on.tracks.style.forEach((s) => {
+    assert.ok(s.look.rank >= on.baseLook.rank, "스타일 갈래는 코디 점수가 지금보다 낮지 않다");
+    assert.ok(Math.abs(s.warmthGap.after) < Math.abs(s.warmthGap.before), "스타일 갈래도 지금보다 따뜻하다");
+  });
+});
+
 test("상품 → 옷 모양: id는 음수, 빈 계절은 빈 목록", () => {
   const x = G.productToClothing({ id: 7, name: "P", brand: "B", category: "shoes", subCategory: "loafer", color: "brown", material: "leather", style: "classic", price: 1 });
   assert.equal(x.id, -7);
