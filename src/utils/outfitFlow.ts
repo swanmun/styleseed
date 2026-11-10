@@ -4,7 +4,7 @@ import type { Clothing, ClothingCategory } from "../types";
 
 import { avoidPenalty } from "./avoidPairs";
 
-import { warmthPenalty } from "./clothingWarmth";
+import { type SeasonMixMode, warmthPenalty } from "./clothingWarmth";
 
 import { evaluateOutfit, type OutfitEvaluation } from "./outfitScore";
 
@@ -54,6 +54,9 @@ export type FlowOptions = {
   // 기본 켬: 기온 대비 0.3 clo 넘게 벗어난 TOP 3 코디 21% → 7%(MATCH 75.6 → 75.5),
   // AI 보조 심판 3명(가림) 6문제 5승 1패, 전원 일치 (styleseed-team-docs 라운드 16)
   warmth?: boolean;
+  // 날씨가 없을 때 계절 섞임을 무엇으로 볼지(clothingWarmth.SeasonMixMode, 시험 옵션). warmth가 켜져 있을 때만 쓴다.
+  // 기본 "basic"(반바지·민소매 + 따뜻한 겉옷, 라운드 16). "sandals"·"tags"는 라운드 24(P24: 숏패딩 + 슬라이드)에서 비교
+  seasonMix?: SeasonMixMode;
   // 피하는 짝(avoidPairs.ts): AI 보조 심판이 짚고 정답 코디도 피하는 짝(네이비 ↔ 검정 겉옷·하의, 티셔츠 × 코트·패딩)이면
   // 짝마다 순위 점수 10점을 뺀다(styleseed-team-docs 라운드 22)
   avoid?: boolean;
@@ -92,6 +95,7 @@ const DEFAULTS: Required<FlowOptions> = {
   diverse: true,
   mmrLambda: 0.7,
   warmth: true,
+  seasonMix: "basic",
   avoid: false,
   score: (_items, evaluation) => evaluation.total,
 };
@@ -166,7 +170,9 @@ export const recommendOutfits = ({
   const temperature = weather ? weather.apparentTemperature ?? weather.temperature : null;
 
   const adjust = (items: Clothing[], rank: number) =>
-    rank - (opts.warmth ? warmthPenalty(items, temperature) : 0) - (opts.avoid ? avoidPenalty(items) : 0);
+    rank -
+    (opts.warmth ? warmthPenalty(items, temperature, opts.seasonMix) : 0) -
+    (opts.avoid ? avoidPenalty(items) : 0);
 
   const rankOf = (items: Clothing[]) => adjust(items, opts.score(items, evaluateOutfit(items, closet)));
 

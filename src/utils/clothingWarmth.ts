@@ -107,18 +107,59 @@ export const WARMTH_TOLERANCE = 0.15;
 export const warmthGap = (items: Clothing[], temperature: number) =>
   outfitClo(items) - targetClo(temperature);
 
+// 날씨가 없을 때 "계절이 섞인 코디"를 무엇으로 볼지 (styleseed-team-docs 라운드 24, 찾은 문제 P24)
+//   basic   반바지·민소매 + 따뜻한 겉옷(얇은 코트 이상)만 (라운드 16, 기본)
+//   sandals basic + 샌들(앱 분류에서 슬라이드도 sandals) + 두꺼운 겉옷(clo 0.5 이상: 패딩·울 코트).
+//           한국 기온별 옷차림 표에서 샌들은 더운 날, 패딩·두꺼운 코트는 추운 날 차림. 정답 코디 1,406개에서 샌들은
+//           재킷·블레이저·코트와는 우연만큼 같이 나와서(배수 0.91~1.05) 그 짝은 깎지 않는다. 패딩과는 0번(우연 0.7번)
+//   tags    코디 안에 계절 태그가 하나도 겹치지 않는 두 옷이 있으면(태그가 비었거나 사계절인 옷은 빼고 본다)
+export type SeasonMixMode = "basic" | "sandals" | "tags";
+
+// 계절 섞임 감점 크기(피하는 짝 감점 avoidPairs.AVOID_PENALTY와 같음)
+export const SEASON_MIX_PENALTY = 10;
+
 // 점수에서 뺄 값. 벗어난 0.1 clo마다 4점
-export const warmthPenalty = (items: Clothing[], temperature: number | null) => {
+export const warmthPenalty = (
+  items: Clothing[],
+  temperature: number | null,
+  seasonMix: SeasonMixMode = "basic",
+) => {
   if (temperature === null) {
-    return seasonMixPenalty(items);
+    return seasonMixPenalty(items, seasonMix);
   }
   const gap = Math.abs(warmthGap(items, temperature));
   return 40 * Math.max(0, gap - WARMTH_TOLERANCE);
 };
 
-// 날씨가 없을 때(이 옷으로 코디): 반바지·민소매에 따뜻한 겉옷(얇은 코트 이상)처럼 계절이 섞인 코디만 깎는다
-export const seasonMixPenalty = (items: Clothing[]) => {
-  const summerPiece = items.some((item) => item.subCategory === "shorts" || item.subCategory === "sleeveless");
-  const warmOuter = items.some((item) => item.category === "outer" && itemClo(item) >= 0.36);
-  return summerPiece && warmOuter ? 10 : 0;
+const SUMMER_PIECES = ["shorts", "sleeveless"];
+
+// sandals 모드에서 샌들과 같이 있으면 깎는 겉옷의 보온(패딩 0.6, 울 코트 0.528은 걸리고 면 트렌치 0.44·재킷은 안 걸림)
+export const HEAVY_OUTER_CLO = 0.5;
+
+const ALL_SEASONS = ["spring", "summer", "fall", "winter"];
+
+// 계절 태그가 하나도 겹치지 않는 두 옷이 있나
+export const hasDisjointSeasons = (items: Clothing[]) => {
+  const tagged = items
+    .map((item) => (item.season ?? []) as string[])
+    .filter((seasons) => seasons.length > 0 && !ALL_SEASONS.every((s) => seasons.includes(s)));
+  for (let i = 0; i < tagged.length; i += 1) {
+    for (let j = i + 1; j < tagged.length; j += 1) {
+      if (!tagged[i].some((s) => tagged[j].includes(s))) return true;
+    }
+  }
+  return false;
+};
+
+// 날씨가 없을 때(이 옷으로 코디): 계절이 섞인 코디만 깎는다
+export const seasonMixPenalty = (items: Clothing[], mode: SeasonMixMode = "basic") => {
+  if (mode === "tags") {
+    return hasDisjointSeasons(items) ? SEASON_MIX_PENALTY : 0;
+  }
+  const outerClo = Math.max(0, ...items.filter((item) => item.category === "outer").map(itemClo));
+  const summerPiece = items.some((item) => SUMMER_PIECES.includes(item.subCategory));
+  if (summerPiece && outerClo >= 0.36) return SEASON_MIX_PENALTY;
+  const sandals = items.some((item) => item.subCategory === "sandals");
+  if (mode === "sandals" && sandals && outerClo >= HEAVY_OUTER_CLO) return SEASON_MIX_PENALTY;
+  return 0;
 };

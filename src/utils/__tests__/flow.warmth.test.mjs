@@ -80,3 +80,40 @@ test("warmth는 기본으로 켜져 있다", () => {
   const on = F.recommendOutfits({ closet, weather: weather(22), options: { warmth: true } }).looks.map((l) => l.key);
   assert.deepEqual(def, on);
 });
+
+// 라운드 24 (P24: 날씨 없이 숏패딩 + 슬라이드)
+test("계절 섞임 sandals 모드: 슬라이드 + 패딩을 깎고, 기본(basic)은 예전 그대로", () => {
+  const slides = [c("top", "shirt"), c("bottom", "trousers"), c("shoes", "sandals", "other", { season: ["summer"] }), c("outer", "padding", "nylon", { season: ["winter"] })];
+  assert.equal(W.warmthPenalty(slides, null), 0);
+  assert.equal(W.warmthPenalty(slides, null, "basic"), 0);
+  assert.equal(W.warmthPenalty(slides, null, "sandals"), W.SEASON_MIX_PENALTY);
+  // 날씨가 있으면 모드와 상관없이 clo로만 판단
+  assert.equal(W.warmthPenalty(slides, 0, "sandals"), W.warmthPenalty(slides, 0, "basic"));
+  // 샌들 + 재킷은 정답 코디에서 우연만큼 나오므로 깎지 않는다
+  const jacket = [c("top", "tshirt"), c("bottom", "jeans", "denim"), c("shoes", "sandals"), c("outer", "jacket", "denim")];
+  assert.equal(W.warmthPenalty(jacket, null, "sandals"), 0);
+});
+
+test("계절 섞임 tags 모드: 계절이 하나도 안 겹치는 두 옷만 깎는다(사계절·빈 태그는 빼고 봄)", () => {
+  const summer = c("shoes", "sandals", "other", { season: ["summer"] });
+  const winter = c("outer", "padding", "nylon", { season: ["winter"] });
+  const spring = c("outer", "jacket", "denim", { season: ["spring", "summer", "fall"] });
+  const all = c("top", "shirt");
+  const none = c("bottom", "trousers", "cotton", { season: [] });
+  assert.equal(W.seasonMixPenalty([all, none, summer, winter], "tags"), W.SEASON_MIX_PENALTY);
+  assert.equal(W.seasonMixPenalty([all, none, summer, spring], "tags"), 0);
+});
+
+test("seasonMix 기본값은 basic(옵션을 주지 않으면 예전과 같다)", () => {
+  const closet = [
+    c("top", "shirt"), c("bottom", "trousers"),
+    c("shoes", "sandals", "other", { season: ["summer"] }), c("shoes", "sneakers"),
+    c("outer", "padding", "nylon", { season: ["winter"] }),
+  ];
+  const fixed = closet[4];
+  const def = F.recommendOutfits({ closet, fixed }).looks.map((l) => l.key);
+  const basic = F.recommendOutfits({ closet, fixed, options: { seasonMix: "basic" } }).looks.map((l) => l.key);
+  assert.deepEqual(def, basic);
+  const sandals = F.recommendOutfits({ closet, fixed, options: { seasonMix: "sandals" } }).looks;
+  assert.ok(!sandals[0].items.some((i) => i.subCategory === "sandals"), "sandals 모드 1위에 슬라이드가 없어야 함");
+});
