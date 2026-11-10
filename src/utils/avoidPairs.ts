@@ -1,5 +1,7 @@
 import type { Clothing } from "../types";
 
+import { weatherBase } from "./flowTaxonomy";
+
 import { getOutfitRole, isUpperRole, type OutfitRole } from "./taxonomyCompat";
 
 /**
@@ -72,7 +74,13 @@ const matches = (item: Clothing, side: Side) => {
 
   if (!side.roles.includes(role) && !(side.roles === UPPER && isUpperRole(role))) return false;
   if (side.colors && !side.colors.includes(item.color)) return false;
-  if (side.subCategories && !side.subCategories.includes(item.subCategory)) return false;
+  // 사전 V1의 세부분류는 같은 취급을 받는 기본 종류로 바꿔 비교한다(라운드 26, flowTaxonomy.ts)
+  if (
+    side.subCategories &&
+    !side.subCategories.includes(item.subCategory) &&
+    !side.subCategories.includes(weatherBase(item.subCategory))
+  )
+    return false;
 
   return true;
 };

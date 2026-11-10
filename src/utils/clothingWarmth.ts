@@ -14,7 +14,9 @@
  */
 import type { Clothing } from "../types";
 
-// 세부종류별 기본 clo (≈ 는 표에 같은 이름이 없어 가까운 항목으로 맞춘 값)
+import { weatherBase } from "./flowTaxonomy";
+
+// 세부종류별 기본 clo (사전 V1의 세부분류는 weatherBase로 바꿔 이 표에서 찾는다. 라운드 26) (≈ 는 표에 같은 이름이 없어 가까운 항목으로 맞춘 값)
 const BASE_CLO: Record<string, number> = {
   // 상의
   tshirt: 0.08, // T-shirt
@@ -66,7 +68,7 @@ const MATERIAL_FACTOR: Record<string, number> = {
 };
 
 export const itemClo = (item: Clothing) => {
-  const base = BASE_CLO[item.subCategory] ?? 0;
+  const base = BASE_CLO[item.subCategory] ?? BASE_CLO[weatherBase(item.subCategory)] ?? 0;
   return base * (MATERIAL_FACTOR[item.material] ?? 1);
 };
 
@@ -157,9 +159,9 @@ export const seasonMixPenalty = (items: Clothing[], mode: SeasonMixMode = "basic
     return hasDisjointSeasons(items) ? SEASON_MIX_PENALTY : 0;
   }
   const outerClo = Math.max(0, ...items.filter((item) => item.category === "outer").map(itemClo));
-  const summerPiece = items.some((item) => SUMMER_PIECES.includes(item.subCategory));
+  const summerPiece = items.some((item) => SUMMER_PIECES.includes(weatherBase(item.subCategory)));
   if (summerPiece && outerClo >= 0.36) return SEASON_MIX_PENALTY;
-  const sandals = items.some((item) => item.subCategory === "sandals");
+  const sandals = items.some((item) => weatherBase(item.subCategory) === "sandals");
   if (mode === "sandals" && sandals && outerClo >= HEAVY_OUTER_CLO) return SEASON_MIX_PENALTY;
   return 0;
 };
