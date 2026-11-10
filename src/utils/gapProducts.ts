@@ -102,7 +102,28 @@ export type GapInput = FlowInput & {
   //   warm:  지금과 같은 순서(오늘 기온을 맞추는 상품 먼저) = suggestions.
   //   화면은 줄마다 이름을 붙인 여러 줄(carousel, Ferrari Dacrema 외 2021·2022)로 보여 주는 것을 생각했다.
   //   라운드 27 설문 3번: 페미닌 옷장 −5도에 숏패딩은 기온을 다 못 맞추면서(−0.48 → −0.31) 점수를 낮춤(55.9 → 48.7), 사람은 "안 권함".
-  warmthTracks?: boolean;
+  // "pareto"(라운드 29): 두 논문을 원문대로 더 적용한 판. true(라운드 28)는 그대로 둔다.
+  //   - Ribeiro 외 2013(ACM TIST, RecSys 2012의 확장) "Pareto-efficient ranking": 상품마다 두 목표
+  //     (따뜻함 = −|산 뒤 보온 차이|, 어울림 = 산 뒤 코디 점수 rank)를 좌표로 놓고, 어느 상품에게도 두 목표 모두 지지 않는
+  //     상품들 = 1번 앞줄. 앞줄에서 하나를 뽑고 다시 앞줄을 만드는 것을 되풀이해 순서를 정한다(Algorithm 1).
+  //     front = 상품이 몇 번째 앞줄인가(1이 가장 좋음).
+  //   - 줄(row) 3개, 줄마다 이름(title)과 상품마다 이유(reason)를 붙인다. 줄 사이 같은 상품은 지우지 않는다
+  //     (Felicioni·Ferrari Dacrema·Cremonesi UMAP 2021: 여러 줄 화면은 줄마다 다른 기준으로 만들고, 줄 사이 겹침은 그대로 둔다).
+  //       style:    파레토 개선(지금 옷장 코디보다 어울림이 안 떨어지면서 더 따뜻함)만, 어울림 높은 순
+  //       warm:     suggestions와 같음(오늘 기온을 맞추는 상품 먼저, 그 안에서 점수 순)
+  //       balanced: Ribeiro 3.2.1 "가장 많이 이기는 상품 먼저"(앞줄에서 지배하는 상품 수 dom이 가장 큰 것)
+  //   두 목표 하나만 보는 줄(style·warm)은 앞줄에서 그 목표가 가장 큰 상품을 뽑는 것과 같아서 보통 정렬과 결과가 같다.
+  //   앞줄이 새로 보태는 것은 front 표시(다른 상품에 둘 다 지는 상품을 알아봄)와 balanced 줄이다.
+  //   점 하나 = (상품, 그 상품이 들어간 코디) 묶음. 상품마다 상위 코디 paretoLooks개를 본다(1위 코디만 보면 놓치는 묶음이 있음, 아래 설명).
+  warmthTracks?: boolean | "pareto";
+  // "pareto"에서 상품마다 볼 코디 수(그 상품이 들어간 상위 코디). 기본 5
+  paretoLooks?: number;
+};
+
+export type GapRow = {
+  key: "style" | "warm" | "balanced";
+  title: string;
+  items: (GapSuggestion & { front: number; reason: string })[];
 };
 
 export type GapResult = {
@@ -113,6 +134,33 @@ export type GapResult = {
   suggestions: GapSuggestion[];
   // warmthTracks를 켜고 날씨 빈칸일 때만
   tracks?: { style: GapSuggestion[]; warm: GapSuggestion[] };
+  // warmthTracks: "pareto"이고 날씨 빈칸일 때만. 화면의 줄 순서대로(스타일 → 따뜻함 → 균형)
+  rows?: GapRow[];
+};
+
+/**
+ * 파레토 앞줄 나누기(Ribeiro 외 2013 Algorithm 1의 앞줄). 점이 두 목표 [a, b] 모두 다른 점 이상이고 하나라도 크면 그 점을 지배한다.
+ * 돌려주는 값: 점마다 앞줄 번호(1부터)와 지배하는 점 수(dom).
+ */
+export const paretoFronts = (points: [number, number][]) => {
+  const dominates = (p: [number, number], q: [number, number]) =>
+    p[0] >= q[0] && p[1] >= q[1] && (p[0] > q[0] || p[1] > q[1]);
+
+  const dom = points.map((p) => points.filter((q) => dominates(p, q)).length);
+
+  const front = points.map(() => 0);
+
+  let left = points.map((_, i) => i);
+
+  for (let level = 1; left.length > 0; level++) {
+    const now = left.filter((i) => !left.some((j) => j !== i && dominates(points[j], points[i])));
+
+    now.forEach((i) => (front[i] = level));
+
+    left = left.filter((i) => !now.includes(i));
+  }
+
+  return { front, dom };
 };
 
 /**
@@ -155,6 +203,7 @@ export const suggestGapProducts = ({
   weatherFirst = true,
   productLambda = 0.7,
   warmthTracks = false,
+  paretoLooks = 5,
   ...flow
 }: GapInput): GapResult => {
   const closetIds = new Set(flow.closet.map((item) => item.id));
@@ -386,11 +435,99 @@ export const suggestGapProducts = ({
     .filter((x) => x.look.rank >= baseLook.rank)
     .sort((a, b) => b.score - a.score || a.product.id - b.product.id);
 
-  return {
-    kind: ranked.length > 0 ? "warmth" : "none",
-    baseLook,
-    missing: [],
-    suggestions,
-    tracks: { style: pickProducts(styleRanked, () => 0), warm: suggestions },
+  const tracks = { style: pickProducts(styleRanked, () => 0), warm: suggestions };
+
+  if (warmthTracks !== "pareto") {
+    return { kind: ranked.length > 0 ? "warmth" : "none", baseLook, missing: [], suggestions, tracks };
+  }
+
+  // 비교하는 것 = (상품, 그 상품이 들어간 코디) 묶음. 사용자에게 보이는 추천이 이 묶음이기 때문이다.
+  // 라운드 29에서 찾음: 상품마다 1위 코디 하나만 보면, 페미닌 옷장 −5도에 패딩을 더했을 때 1위가 "니트 원피스 + 패딩"(−0.49, 더 따뜻해지지 않음)이라
+  // 상품이 빠진다. 같은 패딩의 2위 코디 "슬림 니트 + 플리츠 스커트 + 패딩"은 −0.32로 따뜻하고 점수도 지금보다 높다(62.3 > 55.9).
+  const pairs: GapSuggestion[] = [];
+
+  const versatilityCache = new Map<number, number | null>();
+
+  products.forEach((product) => {
+    const result = recommendOutfits({ ...flow, closet: [...flow.closet, product], options: { ...flow.options, limit: paretoLooks } });
+
+    result.looks
+      .filter((look) => look.items.some((item) => item.id === product.id))
+      .forEach((look) => {
+        const after = warmthGap(look.items, temperature);
+
+        if (Math.abs(before) - Math.abs(after) < minCloGain) return;
+
+        if (!versatilityCache.has(product.id)) versatilityCache.set(product.id, versatility > 0 ? versatilityOf(product) : null);
+
+        const v = versatilityCache.get(product.id)!;
+
+        const score = v === null ? look.rank : (1 - versatility) * look.rank + versatility * v;
+
+        pairs.push({ product, kind: "warmth", fills: null, look, value: look.rank - baseLook.rank, versatility: v, score, warmthGap: { before, after } });
+      });
+  });
+
+  // 두 목표 좌표: 따뜻함 = −|산 뒤 보온 차이|(기온에 가까울수록 큼), 어울림 = 산 뒤 코디 점수
+  const points = pairs.map((x) => [-Math.abs(x.warmthGap!.after), x.look.rank] as [number, number]);
+
+  const { front, dom } = paretoFronts(points);
+
+  const info = new Map(pairs.map((x, i) => [x, { front: front[i], dom: dom[i] }]));
+
+  // 한 줄에 같은 상품은 한 번만(그 줄 기준으로 가장 앞에 온 코디)
+  const onePerProduct = (list: GapSuggestion[]) => {
+    const seen = new Set<number>();
+
+    return list.filter((x) => (seen.has(x.product.id) ? false : (seen.add(x.product.id), true)));
   };
+
+  const f2 = (n: number) => (n >= 0 ? "+" : "") + n.toFixed(2);
+
+  const withReason = (x: GapSuggestion) => ({
+    ...x,
+    front: info.get(x)!.front,
+    reason: `보온 차이 ${f2(x.warmthGap!.before)} → ${f2(x.warmthGap!.after)}${fixesWeather(x) ? "(기온 맞춤)" : "(아직 추움)"}, 코디 점수 ${baseLook.rank.toFixed(1)} → ${x.look.rank.toFixed(1)}`,
+  });
+
+  // 스타일: 파레토 개선(어울림이 지금 옷장 코디 이상)만, 점수(코디 + 쓰임새) 높은 순
+  const styleRow = pickProducts(
+    onePerProduct(pairs.filter((x) => x.look.rank >= baseLook.rank).sort((a, b) => b.score - a.score || a.product.id - b.product.id)),
+    () => 0,
+  );
+
+  // 따뜻함: 오늘 기온을 맞추는 묶음 먼저, 그 안에서 점수 순(suggestions와 같은 기준, 대상만 묶음)
+  const warmRow = pickProducts(
+    onePerProduct([...pairs].sort((a, b) => fixesWeather(b) - fixesWeather(a) || b.score - a.score || a.product.id - b.product.id)),
+    fixesWeather,
+  );
+
+  // 균형: 남은 묶음의 앞줄에서 dom이 가장 큰 것을 뽑고 빼기를 되풀이(Ribeiro 3.2.1). dom은 처음 전체에서 센 값을 그대로 쓴다.
+  // 뽑은 상품의 다른 코디 묶음도 함께 뺀다(한 줄에 같은 상품 한 번)
+  const balanced: GapSuggestion[] = [];
+
+  let left = [...pairs];
+
+  while (balanced.length < limit && left.length > 0) {
+    const pts = left.map((x) => points[pairs.indexOf(x)]);
+
+    const leftFronts = paretoFronts(pts).front;
+
+    const firstFront = left.filter((_, i) => leftFronts[i] === 1);
+
+    firstFront.sort((a, b) => info.get(b)!.dom - info.get(a)!.dom || b.score - a.score || a.product.id - b.product.id);
+
+    balanced.push(firstFront[0]);
+
+    left = left.filter((x) => x.product.id !== firstFront[0].product.id);
+  }
+
+  const rows: GapRow[] = [
+    { key: "style", title: "옷장과 어울리면서 더 따뜻하게", items: styleRow.map(withReason) },
+    { key: "warm", title: "오늘 추위를 확실히 막는 겉옷", items: warmRow.map(withReason) },
+    { key: "balanced", title: "따뜻함과 어울림을 고르게", items: balanced.map(withReason) },
+  ];
+
+  // pareto에서는 묶음이 하나라도 있으면 날씨 빈칸으로 본다(suggestions는 그대로 1위 코디 방식이라 비어 있을 수 있음)
+  return { kind: pairs.length > 0 || ranked.length > 0 ? "warmth" : "none", baseLook, missing: [], suggestions, tracks, rows };
 };

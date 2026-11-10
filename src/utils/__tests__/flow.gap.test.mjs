@@ -178,6 +178,39 @@ test("날씨 빈칸 두 갈래(라운드 28): 기본은 없음, 켜면 스타일
   });
 });
 
+test("파레토 앞줄(라운드 29, Ribeiro 외 2013): 두 목표 모두 지지 않는 점이 1번 앞줄, dom = 지배하는 점 수", () => {
+  // A(3,1) B(1,3) C(2,2)는 서로 지배하지 않음 → 1번 앞줄. D(1,1)은 셋 모두에게 짐 → 2번 앞줄. E(0,0)은 3번
+  const { front, dom } = G.paretoFronts([[3, 1], [1, 3], [2, 2], [1, 1], [0, 0]]);
+  assert.deepEqual(front, [1, 1, 1, 2, 3]);
+  assert.deepEqual(dom, [2, 2, 2, 1, 0]);
+});
+
+test("날씨 빈칸 줄 3개(warmthTracks: \"pareto\"): 줄 이름·이유·앞줄 번호, 따뜻함 줄 = suggestions, true일 때는 rows 없음", () => {
+  const closet = [
+    c(1, "top", "knit", "beige", "knit"), c(3, "bottom", "jeans", "blue", "denim"),
+    c(5, "shoes", "boots", "brown", "leather"), c(6, "outer", "cardigan", "gray", "knit"),
+  ];
+  const catalog = [c(-5, "outer", "padding", "black", "nylon"), c(-7, "outer", "coat", "camel", "wool"), c(-8, "outer", "padding", "pink", "nylon", { style: ["street"] })];
+  const v1 = G.suggestGapProducts({ closet, weather: weather(0), catalog, warmthTracks: true });
+  assert.equal(v1.rows, undefined);
+  const r = G.suggestGapProducts({ closet, weather: weather(0), catalog, warmthTracks: "pareto" });
+  assert.deepEqual(r.rows.map((x) => x.key), ["style", "warm", "balanced"]);
+  assert.deepEqual(r.suggestions.map((s) => s.product.id), v1.suggestions.map((s) => s.product.id), "켜도 suggestions는 그대로");
+  r.rows.forEach((row) => {
+    assert.ok(row.title.length > 0);
+    assert.equal(new Set(row.items.map((s) => s.product.id)).size, row.items.length, "한 줄에 같은 상품은 한 번");
+    row.items.forEach((s) => {
+      assert.ok(s.front >= 1);
+      assert.match(s.reason, /보온 차이 .* 코디 점수/);
+      assert.ok(Math.abs(s.warmthGap.after) < Math.abs(s.warmthGap.before), "모든 줄의 상품은 지금보다 기온에 가깝다");
+      assert.ok(s.look.items.some((x) => x.id === s.product.id), "보여 주는 코디에 그 상품이 들어 있다");
+    });
+  });
+  r.rows[0].items.forEach((s) => assert.ok(s.look.rank >= r.baseLook.rank, "스타일 줄은 코디 점수가 지금 이상"));
+  // 균형 줄 첫 상품은 1번 앞줄
+  if (r.rows[2].items.length > 0) assert.equal(r.rows[2].items[0].front, 1);
+});
+
 test("상품 → 옷 모양: id는 음수, 빈 계절은 빈 목록", () => {
   const x = G.productToClothing({ id: 7, name: "P", brand: "B", category: "shoes", subCategory: "loafer", color: "brown", material: "leather", style: "classic", price: 1 });
   assert.equal(x.id, -7);
