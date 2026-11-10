@@ -67,13 +67,28 @@ const MATERIAL_FACTOR: Record<string, number> = {
   silk: 0.8,
 };
 
-export const itemClo = (item: Clothing) => {
-  const base = BASE_CLO[item.subCategory] ?? BASE_CLO[weatherBase(item.subCategory)] ?? 0;
+// 보온표 고르기(시험 옵션, 기본 "ashrae". styleseed-team-docs 라운드 32 질문 93, 찾은 문제 P28·P21)
+//   ashrae  위 BASE_CLO 그대로(라운드 16).
+//   outdoor 코트를 바깥 겉옷 값으로 본다. 위 표의 coat 0.44는 ASHRAE 핸드북 표의 "Suit jackets and waistcoats (lined)"
+//           줄(정장 윗옷, Single-breasted thick)이라 울 코트(0.528)와 울 트위드 재킷(0.432)이 0.096밖에 차이 나지 않았다(라운드 31).
+//           ISO 7730:2005 부록 C 표 C.2의 바깥 옷(outdoor clothing): Coat 0.60 · Down jacket 0.55 · Parka 0.70
+//           → coat 0.60. 패딩 0.6은 다운 재킷 0.55와 파카 0.70 사이라 그대로, 재킷 0.36은 표 C.2 Jacket 0.35와 같아 그대로.
+//           기온별 목표의 6°C 점(코트 + 니트)도 같은 방법(대표 차림의 clo 합)으로 다시 더한다: 1.20 + (0.60 − 0.44) = 1.36.
+//           날씨가 없을 때의 계절 섞임(seasonMixPenalty)은 바꾸지 않는다(ashrae 그대로).
+export type CloTable = "ashrae" | "outdoor";
+
+const OUTDOOR_CLO: Record<string, number> = {
+  coat: 0.6, // ISO 7730:2005 표 C.2 Outdoor clothing: Coat
+};
+
+export const itemClo = (item: Clothing, table: CloTable = "ashrae") => {
+  const key = BASE_CLO[item.subCategory] !== undefined ? item.subCategory : weatherBase(item.subCategory);
+  const base = (table === "outdoor" ? OUTDOOR_CLO[key] : undefined) ?? BASE_CLO[key] ?? 0;
   return base * (MATERIAL_FACTOR[item.material] ?? 1);
 };
 
-export const outfitClo = (items: Clothing[]) =>
-  items.reduce((sum, item) => sum + itemClo(item), 0);
+export const outfitClo = (items: Clothing[], table: CloTable = "ashrae") =>
+  items.reduce((sum, item) => sum + itemClo(item, table), 0);
 
 // 기온(°C) → 적당한 코디 보온의 가운데 값 (한국 기온별 옷차림 표 기준, 위 머리말)
 const TARGET_POINTS: [number, number][] = [
@@ -88,8 +103,11 @@ const TARGET_POINTS: [number, number][] = [
   [28, 0.2],
 ];
 
-export const targetClo = (temperature: number) => {
-  const pts = TARGET_POINTS;
+// outdoor 보온표에서의 목표(위 CloTable 설명): 6°C 점만 코트 값 차이만큼 올린다
+const OUTDOOR_TARGET_POINTS: [number, number][] = TARGET_POINTS.map(([t, c]) => [t, t === 6 ? 1.36 : c]);
+
+export const targetClo = (temperature: number, table: CloTable = "ashrae") => {
+  const pts = table === "outdoor" ? OUTDOOR_TARGET_POINTS : TARGET_POINTS;
   if (temperature <= pts[0][0]) return pts[0][1];
   if (temperature >= pts[pts.length - 1][0]) return pts[pts.length - 1][1];
   for (let i = 1; i < pts.length; i += 1) {
@@ -106,8 +124,8 @@ export const targetClo = (temperature: number) => {
 export const WARMTH_TOLERANCE = 0.15;
 
 // 날씨가 있을 때: 코디 보온이 목표에서 얼마나 벗어났나(+면 덥게, −면 춥게)
-export const warmthGap = (items: Clothing[], temperature: number) =>
-  outfitClo(items) - targetClo(temperature);
+export const warmthGap = (items: Clothing[], temperature: number, table: CloTable = "ashrae") =>
+  outfitClo(items, table) - targetClo(temperature, table);
 
 // 날씨가 없을 때 "계절이 섞인 코디"를 무엇으로 볼지 (styleseed-team-docs 라운드 24, 찾은 문제 P24)
 //   basic   반바지·민소매 + 따뜻한 겉옷(얇은 코트 이상)만 (라운드 16, 기본)
@@ -125,11 +143,12 @@ export const warmthPenalty = (
   items: Clothing[],
   temperature: number | null,
   seasonMix: SeasonMixMode = "basic",
+  table: CloTable = "ashrae",
 ) => {
   if (temperature === null) {
     return seasonMixPenalty(items, seasonMix);
   }
-  const gap = Math.abs(warmthGap(items, temperature));
+  const gap = Math.abs(warmthGap(items, temperature, table));
   return 40 * Math.max(0, gap - WARMTH_TOLERANCE);
 };
 
@@ -158,7 +177,7 @@ export const seasonMixPenalty = (items: Clothing[], mode: SeasonMixMode = "basic
   if (mode === "tags") {
     return hasDisjointSeasons(items) ? SEASON_MIX_PENALTY : 0;
   }
-  const outerClo = Math.max(0, ...items.filter((item) => item.category === "outer").map(itemClo));
+  const outerClo = Math.max(0, ...items.filter((item) => item.category === "outer").map((item) => itemClo(item)));
   const summerPiece = items.some((item) => SUMMER_PIECES.includes(weatherBase(item.subCategory)));
   if (summerPiece && outerClo >= 0.36) return SEASON_MIX_PENALTY;
   const sandals = items.some((item) => weatherBase(item.subCategory) === "sandals");

@@ -4,7 +4,7 @@ import type { Clothing, ClothingCategory } from "../types";
 
 import { avoidPenalty } from "./avoidPairs";
 
-import { type SeasonMixMode, warmthPenalty } from "./clothingWarmth";
+import { type CloTable, type SeasonMixMode, warmthPenalty } from "./clothingWarmth";
 
 import { evaluateOutfit, type OutfitEvaluation } from "./outfitScore";
 
@@ -57,6 +57,9 @@ export type FlowOptions = {
   // 날씨가 없을 때 계절 섞임을 무엇으로 볼지(clothingWarmth.SeasonMixMode, 시험 옵션). warmth가 켜져 있을 때만 쓴다.
   // 기본 "basic"(반바지·민소매 + 따뜻한 겉옷, 라운드 16). "sandals"·"tags"는 라운드 24(P24: 숏패딩 + 슬라이드)에서 비교
   seasonMix?: SeasonMixMode;
+  // 보온표(clothingWarmth.CloTable, 시험 옵션). warmth가 켜져 있고 날씨가 있을 때만 쓴다.
+  // 기본 "ashrae"(라운드 16). "outdoor"는 코트를 바깥 겉옷 값(ISO 7730 표 C.2 Coat 0.60)으로 본다(라운드 32, P28·P21)
+  cloTable?: CloTable;
   // 피하는 짝(avoidPairs.ts): AI 보조 심판이 짚고 정답 코디도 피하는 짝(네이비 ↔ 검정 겉옷·하의, 티셔츠 × 코트·패딩)이면
   // 짝마다 순위 점수 10점을 뺀다(styleseed-team-docs 라운드 22)
   avoid?: boolean;
@@ -102,6 +105,7 @@ const DEFAULTS: Required<FlowOptions> = {
   mmrLambda: 0.7,
   warmth: true,
   seasonMix: "basic",
+  cloTable: "ashrae",
   avoid: false,
   avoidMode: "pair",
   score: (_items, evaluation) => evaluation.total,
@@ -178,7 +182,7 @@ export const recommendOutfits = ({
 
   const adjust = (items: Clothing[], rank: number) =>
     rank -
-    (opts.warmth ? warmthPenalty(items, temperature, opts.seasonMix) : 0) -
+    (opts.warmth ? warmthPenalty(items, temperature, opts.seasonMix, opts.cloTable) : 0) -
     (opts.avoid ? avoidPenalty(items) : 0);
 
   const rankOf = (items: Clothing[]) => adjust(items, opts.score(items, evaluateOutfit(items, closet)));
@@ -327,7 +331,7 @@ export const recommendOutfits = ({
         candidates.push(look);
 
         if (opts.avoid && opts.avoidMode === "noRemoval") {
-          const base = opts.score(items, evaluation) - (opts.warmth ? warmthPenalty(items, temperature, opts.seasonMix) : 0);
+          const base = opts.score(items, evaluation) - (opts.warmth ? warmthPenalty(items, temperature, opts.seasonMix, opts.cloTable) : 0);
           frames.push({ look, frame: `${idsKey(core)}|${shoe?.id ?? ""}`, hasOuter: outer !== null, base, penalty: avoidPenalty(items) });
         }
       });

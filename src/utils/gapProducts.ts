@@ -362,6 +362,8 @@ export const suggestGapProducts = ({
   };
 
   const todayTemp = flow.weather ? flow.weather.apparentTemperature ?? flow.weather.temperature : null;
+  // 보온표(시험 옵션 cloTable, 라운드 32). 하나의 흐름과 같은 표로 보온 차이를 잰다
+  const cloTable = flow.options?.cloTable ?? "ashrae";
 
   // 상품 후보 목록 고르기(라운드 20 질문 72, 찾은 문제 P20: 흰 스니커즈와 흰 가죽 스니커즈가 같이 나옴)
   // MMR(Carbonell·Goldstein 1998, 라운드 15와 같은 방법): 다음 상품 = λ × 점수/100 − (1−λ) × 이미 고른 상품과 가장 비슷한 정도.
@@ -424,7 +426,7 @@ export const suggestGapProducts = ({
       // 날씨는 안전 규칙이라 쓰임새보다 앞선다(결정 44). 라운드 19: 사계절 쓰임새만 보면 0도에 숏패딩 대신
       // 바람막이를 골랐다(숏패딩은 15·25도에 못 입어 평균이 깎임)
       const okToday = (x: GapSuggestion) =>
-        !weatherFirst || todayTemp === null || Math.abs(warmthGap(x.look.items, todayTemp)) <= needGap ? 1 : 0;
+        !weatherFirst || todayTemp === null || Math.abs(warmthGap(x.look.items, todayTemp, cloTable)) <= needGap ? 1 : 0;
 
       ranked.sort((a, b) => okToday(b) - okToday(a) || b.value - a.value || a.product.id - b.product.id);
 
@@ -440,7 +442,7 @@ export const suggestGapProducts = ({
     return { kind: "none", baseLook, missing: base.missing, suggestions: [] };
   }
 
-  const before = warmthGap(baseLook.items, temperature);
+  const before = warmthGap(baseLook.items, temperature, cloTable);
 
   if (Math.abs(before) <= needGap) {
     return { kind: "none", baseLook, missing: [], suggestions: [] };
@@ -453,7 +455,7 @@ export const suggestGapProducts = ({
 
     if (!look) return;
 
-    const after = warmthGap(look.items, temperature);
+    const after = warmthGap(look.items, temperature, cloTable);
 
     const gain = look.rank - baseLook.rank;
 
@@ -500,7 +502,7 @@ export const suggestGapProducts = ({
     result.looks
       .filter((look) => look.items.some((item) => item.id === product.id))
       .forEach((look) => {
-        const after = warmthGap(look.items, temperature);
+        const after = warmthGap(look.items, temperature, cloTable);
 
         if (Math.abs(before) - Math.abs(after) < minCloGain) return;
 

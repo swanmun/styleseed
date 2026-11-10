@@ -117,3 +117,28 @@ test("seasonMix 기본값은 basic(옵션을 주지 않으면 예전과 같다)"
   const sandals = F.recommendOutfits({ closet, fixed, options: { seasonMix: "sandals" } }).looks;
   assert.ok(!sandals[0].items.some((i) => i.subCategory === "sandals"), "sandals 모드 1위에 슬라이드가 없어야 함");
 });
+
+test("보온표 outdoor(라운드 32): 코트만 0.60(ISO 7730 표 C.2), 트렌치·재킷·패딩은 그대로, 6도 목표 1.36", () => {
+  assert.equal(W.itemClo(c("outer", "coat"), "outdoor"), 0.6);
+  assert.ok(Math.abs(W.itemClo(c("outer", "coat", "wool"), "outdoor") - 0.72) < 1e-9);
+  assert.equal(W.itemClo(c("outer", "coat.duffle"), "outdoor"), 0.6);
+  assert.equal(W.itemClo(c("outer", "coat.trench"), "outdoor"), 0.36);
+  assert.equal(W.itemClo(c("outer", "jacket"), "outdoor"), 0.36);
+  assert.equal(W.itemClo(c("outer", "padding", "nylon"), "outdoor"), 0.6);
+  assert.ok(Math.abs(W.targetClo(6, "outdoor") - 1.36) < 1e-9);
+  assert.equal(W.targetClo(10, "outdoor"), W.targetClo(10));
+  assert.equal(W.targetClo(-5, "outdoor"), W.targetClo(-5));
+  const temps = [-10, 0, 2, 5, 6, 10, 15, 25, 30];
+  for (let i = 1; i < temps.length; i++) assert.ok(W.targetClo(temps[i], "outdoor") <= W.targetClo(temps[i - 1], "outdoor"), `${temps[i]}도`);
+});
+
+test("cloTable 기본값은 ashrae(옵션을 주지 않으면 예전과 같다)", () => {
+  assert.equal(W.itemClo(c("outer", "coat")), 0.44);
+  assert.equal(W.targetClo(6), 1.2);
+  const closet = [c("top", "knit", "knit"), c("bottom", "jeans", "denim"), c("shoes", "boots", "leather"), c("outer", "coat", "wool"), c("outer", "jacket", "wool")];
+  for (const t of [-5, 2, 6]) {
+    const def = F.recommendOutfits({ closet, weather: weather(t) }).looks.map((l) => [l.key, l.rank]);
+    const ash = F.recommendOutfits({ closet, weather: weather(t), options: { cloTable: "ashrae" } }).looks.map((l) => [l.key, l.rank]);
+    assert.deepEqual(def, ash, `${t}도`);
+  }
+});
