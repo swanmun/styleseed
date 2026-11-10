@@ -55,3 +55,18 @@ test("avoid는 기본으로 꺼져 있고, 켜면 피하는 짝이 든 코디가
   const offOpt = F.recommendOutfits({ closet, fixed: blazer, options: { avoid: false } }).looks;
   assert.deepEqual(off.map((l) => l.key), offOpt.map((l) => l.key));
 });
+
+// 라운드 25: 겉옷을 빼서 피하면 득이 없게(avoidMode "noRemoval")
+test("avoidMode noRemoval: 블레이저를 뺀 코디도 같은 감점을 받고, 기본(pair)은 예전 그대로", () => {
+  const shirt = c(1, "top", "shirt", "white");
+  const closet = [shirt, c(2, "bottom", "slacks", "black"), c(3, "bottom", "slacks", "gray"), c(4, "shoes", "loafer", "black", "leather"), c(10, "outer", "blazer", "navy", "wool")];
+  const all = (opts) => F.recommendOutfits({ closet, fixed: shirt, options: { avoid: true, limit: 50, diverse: false, ...opts } }).looks;
+  const removed = (looks) => looks.find((l) => l.key === "1-2-4"); // 흰 셔츠 + 검정 슬랙스 + 로퍼(블레이저 뺌)
+  const pair = removed(all({}));
+  const noRemoval = removed(all({ avoidMode: "noRemoval" }));
+  assert.equal(pair.rank, pair.total);
+  assert.equal(noRemoval.rank, noRemoval.total - A.AVOID_PENALTY);
+  // 바꿔서 피한 코디(회색 슬랙스 + 블레이저)는 감점이 없다
+  const swapped = all({ avoidMode: "noRemoval" }).find((l) => l.key === "1-3-4-10");
+  assert.equal(swapped.rank, swapped.total);
+});

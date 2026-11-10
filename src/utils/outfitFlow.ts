@@ -60,6 +60,12 @@ export type FlowOptions = {
   // 피하는 짝(avoidPairs.ts): AI 보조 심판이 짚고 정답 코디도 피하는 짝(네이비 ↔ 검정 겉옷·하의, 티셔츠 × 코트·패딩)이면
   // 짝마다 순위 점수 10점을 뺀다(styleseed-team-docs 라운드 22)
   avoid?: boolean;
+  // 피하는 짝 감점을 어디에 붙일지(avoid가 켜져 있을 때만, 시험 옵션. styleseed-team-docs 라운드 25)
+  //   pair      피하는 짝이 든 코디에만(라운드 22, 기본)
+  //   noRemoval 겉옷을 빼서 피하는 것은 득이 없게 한다: 같은 뼈대·신발에 겉옷을 더한 코디 중 가장 좋은 것(감점 전 점수)이
+  //             피하는 짝이면, 겉옷 없는 코디도 같은 감점을 받는다. 그래서 엔진은 겉옷을 빼기보다 하의·상의를 바꿔 피한다.
+  //             (라운드 23: 블레이저를 빼서 피한 코디가 AI 심판에게 짐)
+  avoidMode?: "pair" | "noRemoval";
   // ③ 점수를 갈아 끼울 때(시험·실험용). 없으면 MATCH(evaluateOutfit의 total)
   score?: (items: Clothing[], evaluation: OutfitEvaluation) => number;
 };
@@ -97,6 +103,7 @@ const DEFAULTS: Required<FlowOptions> = {
   warmth: true,
   seasonMix: "basic",
   avoid: false,
+  avoidMode: "pair",
   score: (_items, evaluation) => evaluation.total,
 };
 
@@ -294,6 +301,8 @@ export const recommendOutfits = ({
 
   const candidates: FlowLook[] = [];
 
+  const frames: { look: FlowLook; frame: string; hasOuter: boolean; base: number; penalty: number }[] = [];
+
   cores.forEach((core) => {
     shoeOptions.forEach((shoe) => {
       outerOptions.forEach((outer) => {
@@ -313,10 +322,33 @@ export const recommendOutfits = ({
 
         const evaluation = evaluateOutfit(items, closet);
 
-        candidates.push({ ...evaluation, key, core: idsKey(core), rank: adjust(items, opts.score(items, evaluation)) });
+        const look: FlowLook = { ...evaluation, key, core: idsKey(core), rank: adjust(items, opts.score(items, evaluation)) };
+
+        candidates.push(look);
+
+        if (opts.avoid && opts.avoidMode === "noRemoval") {
+          const base = opts.score(items, evaluation) - (opts.warmth ? warmthPenalty(items, temperature, opts.seasonMix) : 0);
+          frames.push({ look, frame: `${idsKey(core)}|${shoe?.id ?? ""}`, hasOuter: outer !== null, base, penalty: avoidPenalty(items) });
+        }
       });
     });
   });
+
+  // noRemoval: 겉옷 없는 코디는 같은 뼈대·신발의 가장 좋은 겉옷 코디(감점 전 점수)가 받은 피하는 짝 감점을 함께 받는다
+  if (frames.length > 0) {
+    const bestWithOuter = new Map<string, (typeof frames)[number]>();
+    frames.forEach((f) => {
+      if (!f.hasOuter) return;
+      const best = bestWithOuter.get(f.frame);
+      if (!best || f.base > best.base) bestWithOuter.set(f.frame, f);
+    });
+    frames.forEach((f) => {
+      const best = bestWithOuter.get(f.frame);
+      if (!f.hasOuter && best && best.penalty > f.penalty) {
+        f.look.rank = f.base - best.penalty;
+      }
+    });
+  }
 
   candidates.sort((a, b) => b.rank - a.rank || a.key.localeCompare(b.key));
 
