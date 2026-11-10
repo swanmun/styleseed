@@ -94,6 +94,12 @@ export type GapInput = FlowInput & {
   seasonTemps?: number[] | null;
   // 빈칸 채우기에서 오늘 기온을 맞춰 주는 상품을 먼저 세운다(기본 켬). false면 라운드 17·18 방식
   weatherFirst?: boolean;
+  // 쓰임새를 잴 때, 상품이 그 기온에 맞지 않는데 같은 자리에 다른 옷이 없어서 "대신 쓰는 옷"으로 남은 경우도 못 쓰는 것(0점)으로 센다
+  // (시험용, 기본 꺼짐. styleseed-team-docs 라운드 37, 찾은 문제 P30).
+  //   날씨 거르기(buildWeatherPool)는 그 자리에 맞는 옷이 하나도 없으면 가장 가까운 옷을 남긴다. 그래서 신발이 하나도 없는 옷장에
+  //   가을·겨울 부츠를 더하면 25도에도 그 부츠가 남아 "그 날씨에 못 쓰면 0점"(라운드 19)이 걸리지 않았다.
+  //   판단은 상품 하나만 날씨 거르기에 넣었을 때 그 자리에 안내(대신 씀·막힘)가 붙는지로 한다(지금 화면 코드는 건드리지 않는다).
+  strictUse?: boolean;
   // 상품 후보 목록(limit개)을 MMR로 고를 때의 λ(기본 0.7, 라운드 15 코디 TOP 3와 같은 값). null이면 점수 순 그대로(라운드 19까지)
   productLambda?: number | null;
   // 날씨 빈칸을 두 갈래로도 돌려준다(시험용, 기본 꺼짐. 라운드 28 질문 86, 찾은 문제 P25). 켜도 suggestions는 그대로다.
@@ -246,6 +252,7 @@ export const suggestGapProducts = ({
   versatility = 1,
   seasonTemps = [5, 15, 25],
   weatherFirst = true,
+  strictUse = false,
   productLambda = 0.7,
   warmthTracks = false,
   paretoLooks = 5,
@@ -330,6 +337,17 @@ export const suggestGapProducts = ({
       const anchors = anchorsFor(product, weather);
 
       if (anchors.length === 0) return;
+
+      // 시험 옵션 strictUse: 혼자서는 그 날씨에 맞지 않는 상품은 그 기온에서 0점
+      if (
+        strictUse &&
+        weather &&
+        buildWeatherPool([product], getWeatherRule(weather)).notes.some((note) => slots.includes(note.category))
+      ) {
+        perContext.push(0);
+
+        return;
+      }
 
       const ranks = anchors.map((anchor) => {
         const result = recommendOutfits({

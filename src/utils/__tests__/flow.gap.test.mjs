@@ -255,3 +255,18 @@ test("상품 → 옷 모양: id는 음수, 빈 계절은 빈 목록", () => {
   assert.deepEqual(x.season, []);
   assert.deepEqual(x.style, ["classic"]);
 });
+
+test("strictUse(라운드 37, 기본 꺼짐): 신발이 하나도 없는 옷장에서 가을·겨울 부츠는 25도 몫이 0점이 되어 쓰임새가 내려가고, 끄면 그대로", () => {
+  const closet = [
+    c(1, "top", "tshirt", "white"), c(2, "top", "knit", "beige", "knit"),
+    c(3, "bottom", "jeans", "blue", "denim"), c(4, "bottom", "slacks", "black"),
+  ];
+  const boots = c(-1, "shoes", "boots", "brown", "leather", { season: ["fall", "winter"] });
+  const loafer = c(-2, "shoes", "loafer", "black", "leather");
+  const v = (options) => Object.fromEntries(G.suggestGapProducts({ closet, catalog: [boots, loafer], productLambda: null, ...options })
+    .suggestions.map((s) => [s.product.id, s.versatility]));
+  const off = v({}), offExplicit = v({ strictUse: false }), on = v({ strictUse: true });
+  assert.deepEqual(off, offExplicit);
+  assert.ok(on[boots.id] < off[boots.id]);
+  assert.equal(on[loafer.id], off[loafer.id]);
+});
