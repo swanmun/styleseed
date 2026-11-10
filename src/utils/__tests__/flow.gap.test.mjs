@@ -211,6 +211,44 @@ test("날씨 빈칸 줄 3개(warmthTracks: \"pareto\"): 줄 이름·이유·앞�
   if (r.rows[2].items.length > 0) assert.equal(r.rows[2].items[0].front, 1);
 });
 
+test("옷장 분위기(라운드 30, Hsiao·Grauman 2018 θ): 스타일 비율과 곱의 합, 앞줄은 목표 3개도 된다", () => {
+  const p = G.styleProfile([{ style: ["feminine"] }, { style: ["feminine", "classic"] }, { style: [] }, { style: ["street"] }]);
+  assert.equal(p.get("feminine"), 1 / 4 + 1 / 8);
+  assert.equal(p.get("classic"), 1 / 8);
+  assert.equal(p.get("street"), 1 / 4);
+  // 코디 [페미닌, 스트릿] = 페미닌 0.5·스트릿 0.5 → 0.5 × 0.375 + 0.5 × 0.25
+  assert.equal(G.styleFit([{ style: ["feminine"] }, { style: ["street"] }], p), 0.5 * 0.375 + 0.5 * 0.25);
+  const { front } = G.paretoFronts([[1, 1, 0], [1, 1, 1], [0, 2, 0]]);
+  assert.deepEqual(front, [2, 1, 1]);
+});
+
+test("styleFit(라운드 30): 기본 꺼짐이면 라운드 29와 같고, 켜면 스타일 줄은 상품 한 벌의 옷장 분위기가 지금 코디보다 낮은 상품을 빼고 이유에 분위기를 적는다", () => {
+  const fem = { style: ["feminine"] };
+  const closet = [
+    c(1, "top", "knit", "beige", "knit", fem), c(3, "bottom", "skirt", "beige", "wool", fem),
+    c(5, "shoes", "boots", "brown", "leather", fem), c(6, "outer", "cardigan", "gray", "knit", fem),
+  ];
+  const catalog = [
+    c(-8, "outer", "padding", "black", "nylon", { style: ["street"] }),
+    c(-9, "outer", "padding", "pink", "nylon", fem),
+    c(-7, "outer", "coat", "camel", "wool", { style: ["street"] }),
+  ];
+  const base = { closet, weather: weather(0), catalog, warmthTracks: "pareto" };
+  const r29 = G.suggestGapProducts(base);
+  const off = G.suggestGapProducts({ ...base, styleFit: false });
+  assert.deepEqual(JSON.stringify(off.rows), JSON.stringify(r29.rows), "꺼 두면 라운드 29와 같다");
+  const on = G.suggestGapProducts({ ...base, styleFit: true });
+  const baseFit = G.styleFit(on.baseLook.items, G.styleProfile(closet));
+  assert.ok(off.rows[0].items.some((s) => s.product.id === -8 || s.product.id === -7), "꺼 두면 스트릿 상품도 스타일 줄에 들어온다(이 시험이 뜻이 있는지 확인)");
+  assert.ok(on.rows[0].items.length > 0);
+  on.rows[0].items.forEach((s) => {
+    assert.ok(G.styleFit([s.product], G.styleProfile(closet)) >= baseFit - 1e-9, "스타일 줄은 상품의 옷장 분위기가 지금 코디 이상");
+    assert.ok(s.product.style.includes("feminine"), "페미닌 옷장의 스타일 줄에 스트릿 상품이 없다");
+    assert.match(s.reason, /옷장 분위기 상품 \d\.\d\d\(지금 코디 \d\.\d\d\)/);
+  });
+  assert.deepEqual(on.rows[1].items.map((s) => s.product.id), off.rows[1].items.map((s) => s.product.id), "따뜻함 줄은 그대로");
+});
+
 test("상품 → 옷 모양: id는 음수, 빈 계절은 빈 목록", () => {
   const x = G.productToClothing({ id: 7, name: "P", brand: "B", category: "shoes", subCategory: "loafer", color: "brown", material: "leather", style: "classic", price: 1 });
   assert.equal(x.id, -7);

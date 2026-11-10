@@ -118,6 +118,50 @@ export type GapInput = FlowInput & {
   warmthTracks?: boolean | "pareto";
   // "pareto"에서 상품마다 볼 코디 수(그 상품이 들어간 상위 코디). 기본 5
   paretoLooks?: number;
+  // "pareto"에서 세 번째 목표 "옷장 분위기"를 더한다(시험용, 기본 꺼짐. 라운드 30 질문 90, 찾은 문제 P25).
+  //   라운드 30에서 찾음: 코디 점수(rank)에서 스타일은 취향(preference, 무게 0.1) 안에만 있어서, 페미닌 옷장에 스트릿 패딩을 넣어도
+  //   총점이 그대로(69 → 69)다. 그래서 어울림만 보는 스타일 줄이 스트릿 패딩을 1위로 냈다(라운드 29).
+  //   방법(이미 있는 것 두 개가 같은 말):
+  //   - Hsiao·Grauman CVPR 2018 "Creating Capsule Wardrobes" 식 (5)와 3.2절 끝: 사용자 취향 = 그 사람 코디들의 스타일 비율 평균(θ_user),
+  //     스타일 i의 무게 w_i = θ_user_i, 코디가 스타일 i를 덮는 정도 = P(z_i | 코디). 여기서는 옷장에 코디 기록이 없어서 옷 한 벌씩의 평균으로 대신한다.
+  //   - Pazzani·Billsus 2007 "Content-Based Recommendation Systems"(The Adaptive Web): 사용자 프로필 = 가진 물건 특징의 평균, 후보와 닮은 정도로 점수.
+  //   옷장 분위기 = Σ_i θ_user_i × θ_x_i (θ = 옷마다 스타일 태그를 1/개수로 나눈 값의 평균, styleProfile·styleFit).
+  //   x는 **상품 한 벌**이다(Pazzani·Billsus: 추천하는 물건과 사용자 프로필을 비교). 처음에는 Hsiao 원문대로 코디 전체(x = 코디)로 쟀는데,
+  //   페미닌 −5도에서 패딩과 함께 입는 나머지 3벌을 더 페미닌하게 바꿔 코디 평균을 지금과 같게(0.34) 맞춰 버려 스트릿 패딩이 그대로 1위였다.
+  //   사는 것은 상품 한 벌이라 상품 단위로 바꿨다(swanmun 2026-11-10 "상품 단위"). 상품 단위면 스트릿 패딩 0.00 → 스타일 줄에서 빠짐.
+  //   켜면: 앞줄을 목표 3개(따뜻함·어울림·상품의 옷장 분위기)로 만들고, 스타일 줄은 어울림이 지금 코디 이상이면서
+  //   상품의 옷장 분위기가 지금 코디의 옷장 분위기(= 옷마다 분위기의 평균) 이상인 묶음만.
+  styleFit?: boolean;
+};
+
+/**
+ * 스타일 비율(라운드 30, Hsiao·Grauman 2018 θ). 옷마다 스타일 태그를 1/개수로 나누고 옷 수로 평균한다.
+ * 태그가 없는 옷은 0으로 센다(평균의 분모에는 들어간다).
+ */
+export const styleProfile = (items: Clothing[]) => {
+  const profile = new Map<string, number>();
+
+  if (items.length === 0) return profile;
+
+  items.forEach((item) => {
+    const styles = item.style ?? [];
+
+    styles.forEach((style) => profile.set(style, (profile.get(style) ?? 0) + 1 / styles.length / items.length));
+  });
+
+  return profile;
+};
+
+/**
+ * 옷장 분위기(라운드 30): 옷장 스타일 비율과 옷들(상품 한 벌이면 [상품])의 스타일 비율의 곱의 합(Hsiao·Grauman 2018 식 5의 w_i × P(z_i|x)). 0~1.
+ * 비율이 옷마다의 평균이라, 여러 벌의 옷장 분위기 = 옷 한 벌씩의 옷장 분위기의 평균이다.
+ */
+export const styleFit = (lookItems: Clothing[], closetProfile: Map<string, number>) => {
+  let sum = 0;
+
+  styleProfile(lookItems).forEach((share, style) => (sum += share * (closetProfile.get(style) ?? 0)));
+
+  return sum;
 };
 
 export type GapRow = {
@@ -139,12 +183,13 @@ export type GapResult = {
 };
 
 /**
- * 파레토 앞줄 나누기(Ribeiro 외 2013 Algorithm 1의 앞줄). 점이 두 목표 [a, b] 모두 다른 점 이상이고 하나라도 크면 그 점을 지배한다.
+ * 파레토 앞줄 나누기(Ribeiro 외 2013 Algorithm 1의 앞줄). 점이 모든 목표에서 다른 점 이상이고 하나라도 크면 그 점을 지배한다.
+ * 목표 수는 몇 개든 된다(라운드 29는 2개, 라운드 30 styleFit은 3개).
  * 돌려주는 값: 점마다 앞줄 번호(1부터)와 지배하는 점 수(dom).
  */
-export const paretoFronts = (points: [number, number][]) => {
-  const dominates = (p: [number, number], q: [number, number]) =>
-    p[0] >= q[0] && p[1] >= q[1] && (p[0] > q[0] || p[1] > q[1]);
+export const paretoFronts = (points: number[][]) => {
+  const dominates = (p: number[], q: number[]) =>
+    p.every((v, k) => v >= q[k]) && p.some((v, k) => v > q[k]);
 
   const dom = points.map((p) => points.filter((q) => dominates(p, q)).length);
 
@@ -204,6 +249,7 @@ export const suggestGapProducts = ({
   productLambda = 0.7,
   warmthTracks = false,
   paretoLooks = 5,
+  styleFit: useStyleFit = false,
   ...flow
 }: GapInput): GapResult => {
   const closetIds = new Set(flow.closet.map((item) => item.id));
@@ -468,8 +514,19 @@ export const suggestGapProducts = ({
       });
   });
 
-  // 두 목표 좌표: 따뜻함 = −|산 뒤 보온 차이|(기온에 가까울수록 큼), 어울림 = 산 뒤 코디 점수
-  const points = pairs.map((x) => [-Math.abs(x.warmthGap!.after), x.look.rank] as [number, number]);
+  // 옷장 분위기(styleFit을 켰을 때만, 라운드 30): 옷장 스타일 비율은 상품을 더하기 전 옷장으로 잰다
+  const closetProfile = styleProfile(flow.closet);
+
+  // 상품 한 벌의 옷장 분위기
+  const fitOf = (x: GapSuggestion) => styleFit([x.product], closetProfile);
+
+  // 지금 코디의 옷장 분위기(옷마다 분위기의 평균)
+  const baseFit = styleFit(baseLook.items, closetProfile);
+
+  // 목표 좌표: 따뜻함 = −|산 뒤 보온 차이|(기온에 가까울수록 큼), 어울림 = 산 뒤 코디 점수 (+ styleFit이면 상품의 옷장 분위기)
+  const points = pairs.map((x) =>
+    useStyleFit ? [-Math.abs(x.warmthGap!.after), x.look.rank, fitOf(x)] : [-Math.abs(x.warmthGap!.after), x.look.rank],
+  );
 
   const { front, dom } = paretoFronts(points);
 
@@ -487,12 +544,19 @@ export const suggestGapProducts = ({
   const withReason = (x: GapSuggestion) => ({
     ...x,
     front: info.get(x)!.front,
-    reason: `보온 차이 ${f2(x.warmthGap!.before)} → ${f2(x.warmthGap!.after)}${fixesWeather(x) ? "(기온 맞춤)" : "(아직 추움)"}, 코디 점수 ${baseLook.rank.toFixed(1)} → ${x.look.rank.toFixed(1)}`,
+    reason:
+      `보온 차이 ${f2(x.warmthGap!.before)} → ${f2(x.warmthGap!.after)}${fixesWeather(x) ? "(기온 맞춤)" : "(아직 추움)"}, 코디 점수 ${baseLook.rank.toFixed(1)} → ${x.look.rank.toFixed(1)}` +
+      (useStyleFit ? `, 옷장 분위기 상품 ${fitOf(x).toFixed(2)}(지금 코디 ${baseFit.toFixed(2)})` : ""),
   });
 
-  // 스타일: 파레토 개선(어울림이 지금 옷장 코디 이상)만, 점수(코디 + 쓰임새) 높은 순
+  // 스타일: 파레토 개선(어울림이 지금 옷장 코디 이상, styleFit이면 상품의 옷장 분위기도 지금 코디 이상)만, 점수(코디 + 쓰임새) 높은 순
+  // 옷장 분위기는 소수점 아래 아주 작은 차이(계산 오차)를 같다고 본다
+  const notWorseFit = (x: GapSuggestion) => !useStyleFit || fitOf(x) >= baseFit - 1e-9;
+
   const styleRow = pickProducts(
-    onePerProduct(pairs.filter((x) => x.look.rank >= baseLook.rank).sort((a, b) => b.score - a.score || a.product.id - b.product.id)),
+    onePerProduct(
+      pairs.filter((x) => x.look.rank >= baseLook.rank && notWorseFit(x)).sort((a, b) => b.score - a.score || a.product.id - b.product.id),
+    ),
     () => 0,
   );
 
