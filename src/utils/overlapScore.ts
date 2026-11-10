@@ -56,3 +56,7 @@ export const overlapRescore = rescore(["season", "tpo"]);
 
 // 계절만 겹침 계수(찾은 문제 P19는 주로 계절. 상황 점수는 지금 채점표 그대로)
 export const seasonOverlapRescore = rescore(["season"]);
+
+// 상황(TPO)만 겹침 계수(계절 점수는 지금 채점표 그대로). 라운드 35: 직장인 첫 신발의 순위를 가른 것이 상황 꼬리표
+// (로퍼 office/formal의 formal이 자카드 분모만 키움)라서, 라운드 20에서 안 해 본 "상황만"을 따로 시험한다(라운드 36, 질문 96)
+export const tpoOverlapRescore = rescore(["tpo"]);

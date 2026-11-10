@@ -56,3 +56,24 @@ test("계절·상황 말고는 지금 채점표와 같은 식: 계절·상황이
   const e = S.evaluateOutfit(items, items);
   assert.equal(O.overlapRescore(items, e), e.total);
 });
+
+test("상황만 겹침(라운드 36): 계절 점수는 지금 채점표 그대로, 그리고 꼬리표가 더 많은 신발의 감점은 없어지지 않는다", () => {
+  // 상황 꼬리표가 모두 같고 계절만 섞인 코디: 상황만 바꾸는 채점표는 총점이 지금과 같아야 한다
+  const mixed = [c(1, "top", "knit", ["fall", "winter"]), c(2, "bottom", "slacks", ["spring", "fall"]), c(3, "shoes", "loafer", ALL)];
+  const e0 = S.evaluateOutfit(mixed, []);
+  assert.equal(O.tpoOverlapRescore(mixed, e0), e0.total);
+  assert.notEqual(O.seasonOverlapRescore(mixed, e0), e0.total);
+
+  // 옷은 office/casual, 로퍼는 office/formal(넓음) 또는 office(좁음)
+  const shirt = c(1, "top", "shirt", ["spring", "fall"], ["office", "casual"]);
+  const slacks = c(2, "bottom", "slacks", ["spring", "fall"], ["office", "casual"]);
+  const wide = c(3, "shoes", "loafer", ["spring", "fall"], ["office", "formal"]);
+  const narrow = c(4, "shoes", "loafer", ["spring", "fall"], ["office"]);
+  const e1 = S.evaluateOutfit([shirt, slacks, wide], []);
+  const e2 = S.evaluateOutfit([shirt, slacks, narrow], []);
+  assert.ok(e1.total < e2.total);
+  // 겹침 계수 = 공통 수 ÷ 가장 짧은 목록: 넓음 1/2, 좁음 1/1 → 여전히 좁은 쪽이 높다(시험해 보고 안 사실을 그대로 적어 둠)
+  assert.equal(O.overlapCoefficient([shirt.tpo, slacks.tpo, wide.tpo]), 0.5);
+  assert.equal(O.overlapCoefficient([shirt.tpo, slacks.tpo, narrow.tpo]), 1);
+  assert.ok(O.tpoOverlapRescore(e1.items, e1) < O.tpoOverlapRescore(e2.items, e2));
+});
